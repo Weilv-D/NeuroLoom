@@ -94,6 +94,28 @@ function createMlpTrace(): TraceBundle {
           { label: "lr", value: round(0.01 - t * 0.006) }
         ],
         matrix: createMatrix(8, 8, (x, y) => Math.sin((x + y) * 4 + t * 5)),
+        boundarySnapshots: [
+          {
+            id: "input-plane",
+            label: "Input Plane",
+            matrix: createMatrix(8, 8, (x, y) => Math.tanh((x - 0.5) * 2.1 + Math.sin(y * 4.4 + t * 4.2)))
+          },
+          {
+            id: "hidden-mix",
+            label: "Hidden Mix",
+            matrix: createMatrix(8, 8, (x, y) => Math.sin((x * 3.2 + y * 2.4 + t * 5.4) * Math.PI))
+          },
+          {
+            id: "margin-map",
+            label: "Margin Map",
+            matrix: createMatrix(8, 8, (x, y) => Math.cos((x - y) * 3.8 + t * 3.6))
+          }
+        ],
+        regions: [
+          { label: "outer spiral", value: round(0.42 + t * 0.23) },
+          { label: "center split", value: round(0.31 + Math.sin(t * 4.4) * 0.08 + 0.08) },
+          { label: "lower arc", value: round(0.26 + Math.cos(t * 3.2) * 0.07 + 0.07) }
+        ],
         selectionDetails: {
           "hidden-a": detail("Hidden unit A", "Responds to the outer spiral arc.", [metric("activation", 0.54 + t * 0.2), metric("weight norm", 1.62 - t * 0.18)]),
           "hidden-b": detail("Hidden unit B", "Sharpens the center split.", [metric("activation", 0.33 + Math.sin(t * 3) * 0.2), metric("sparsity", 0.42)]),
@@ -248,6 +270,69 @@ function createCnnTrace(): TraceBundle {
           { label: "class margin", value: round(0.14 + t * 0.41) }
         ],
         matrix: createMatrix(6, 6, (x, y) => Math.cos((x - y) * 4 + t * 5)),
+        stages: [
+          {
+            id: "stage-1",
+            label: "Stage 1",
+            matrix: createMatrix(6, 6, (x, y) => Math.sin((x * 2.4 + y * 3.1 + t * 4.8) * Math.PI)),
+            channels: [
+              {
+                id: "conv-1-edge",
+                label: "Edge",
+                nodeId: "conv-1",
+                matrix: createMatrix(5, 5, (x, y) => Math.cos((x - y) * 4 + t * 4.2)),
+                score: round(0.52 + t * 0.12)
+              },
+              {
+                id: "conv-1-fold",
+                label: "Fold",
+                nodeId: "conv-1",
+                matrix: createMatrix(5, 5, (x, y) => Math.sin((x + y) * 4.4 + t * 5.6)),
+                score: round(0.44 + Math.sin(t * 3.4) * 0.08)
+              },
+              {
+                id: "pool-1-sparse",
+                label: "Sparse",
+                nodeId: "pool-1",
+                matrix: createMatrix(5, 5, (x, y) => Math.tanh((x - 0.5) * 2.2 + Math.cos(y * 4.5 + t * 3.4))),
+                score: round(0.36 + t * 0.09)
+              }
+            ]
+          },
+          {
+            id: "stage-2",
+            label: "Stage 2",
+            matrix: createMatrix(6, 6, (x, y) => Math.cos((x * 2.2 - y * 2.9 + t * 5.4) * Math.PI)),
+            channels: [
+              {
+                id: "conv-2-texture",
+                label: "Texture",
+                nodeId: "conv-2",
+                matrix: createMatrix(5, 5, (x, y) => Math.sin((x * 3.2 + y * 2.1 + t * 5.8) * Math.PI)),
+                score: round(0.58 + t * 0.16)
+              },
+              {
+                id: "conv-2-silhouette",
+                label: "Silhouette",
+                nodeId: "conv-2",
+                matrix: createMatrix(5, 5, (x, y) => Math.cos((x - y) * 5.1 + t * 4.1)),
+                score: round(0.48 + Math.cos(t * 3.1) * 0.07 + 0.06)
+              },
+              {
+                id: "pool-2-compress",
+                label: "Compress",
+                nodeId: "pool-2",
+                matrix: createMatrix(5, 5, (x, y) => Math.tanh((x + y - 1) * 2.5 + t * 2.4)),
+                score: round(0.41 + t * 0.11)
+              }
+            ]
+          }
+        ],
+        topClasses: [
+          { label: "ankle boot", value: round(0.48 + t * 0.26) },
+          { label: "bag", value: round(0.22 - t * 0.05 + 0.04) },
+          { label: "shirt", value: round(0.16 - t * 0.04 + 0.03) }
+        ],
         selectionDetails: {
           image: detail("Input image", "The replay begins with the grayscale garment image entering the first stage.", [metric("contrast", 0.66), metric("mean pixel", 0.41)]),
           "pool-1": detail("Pool 1", "Spatial details collapse while salient edges survive.", [metric("compression", 0.5 + t * 0.1), metric("sparsity", 0.38)]),

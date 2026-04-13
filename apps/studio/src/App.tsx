@@ -559,6 +559,9 @@ function InspectorPanel({
         {inspectPayload ? <PayloadView payload={inspectPayload} /> : <p className="muted-copy">No inspect payload.</p>}
       </section>
 
+      {bundle.manifest.family === "mlp" ? <MlpBoundaryPanel payload={inspectPayload} /> : null}
+      {bundle.manifest.family === "cnn" ? <CnnFeaturePanel payload={inspectPayload} onSelect={onSelect} /> : null}
+
       {bundle.manifest.family === "transformer" ? (
         <TransformerAttentionPanel bundle={bundle} payload={inspectPayload} selection={selection} onSelect={onSelect} />
       ) : null}
@@ -718,6 +721,197 @@ function TransformerAttentionPanel({
               <div key={entry.token} className="detail-stat">
                 <span>{entry.token}</span>
                 <strong>{formatMetric(entry.probability)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MlpBoundaryPanel({ payload }: { payload: Record<string, unknown> | null }) {
+  const snapshots = Array.isArray(payload?.boundarySnapshots)
+    ? payload.boundarySnapshots.flatMap((snapshot) => {
+        if (!snapshot || typeof snapshot !== "object") return [];
+        const id = "id" in snapshot && typeof snapshot.id === "string" ? snapshot.id : "snapshot";
+        const label = "label" in snapshot && typeof snapshot.label === "string" ? snapshot.label : id;
+        const matrix = "matrix" in snapshot && Array.isArray(snapshot.matrix) ? (snapshot.matrix as number[][]) : [];
+        return [{ id, label, matrix }];
+      })
+    : [];
+  const regions = Array.isArray(payload?.regions)
+    ? payload.regions.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const label = "label" in entry && typeof entry.label === "string" ? entry.label : null;
+        const value = "value" in entry && typeof entry.value === "number" ? entry.value : null;
+        return label && value !== null ? [{ label, value }] : [];
+      })
+    : [];
+  const [selectedSnapshotIndex, setSelectedSnapshotIndex] = useState(0);
+  const selectedSnapshot = snapshots[Math.min(selectedSnapshotIndex, Math.max(snapshots.length - 1, 0))] ?? null;
+
+  return (
+    <section className="panel-section">
+      <header className="panel-section__header">
+        <span>Decision Boundary</span>
+        <strong>{selectedSnapshot?.label ?? "No snapshot"}</strong>
+      </header>
+      <div className="focus-group__chips">
+        {snapshots.map((snapshot, index) => (
+          <button
+            key={snapshot.id}
+            type="button"
+            className={selectedSnapshotIndex === index ? "focus-chip is-active" : "focus-chip"}
+            onClick={() => setSelectedSnapshotIndex(index)}
+          >
+            {snapshot.label}
+          </button>
+        ))}
+      </div>
+      {selectedSnapshot ? (
+        <div className="family-slice">
+          <div className="family-slice__meta">
+            <span>Boundary slice</span>
+            <strong>{selectedSnapshot.label}</strong>
+          </div>
+          <MatrixHeatmap matrix={selectedSnapshot.matrix} />
+        </div>
+      ) : null}
+      {regions.length > 0 ? (
+        <div className="token-bars">
+          {regions.map((region) => (
+            <div key={region.label} className="token-bars__item">
+              <div className="token-bars__meta">
+                <span>{region.label}</span>
+                <strong>{formatMetric(region.value)}</strong>
+              </div>
+              <div className="series-bar__track">
+                <div className="series-bar__fill" style={{ width: `${Math.max(6, region.value * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CnnFeaturePanel({
+  payload,
+  onSelect
+}: {
+  payload: Record<string, unknown> | null;
+  onSelect(selection: SelectionState): void;
+}) {
+  const stages = Array.isArray(payload?.stages)
+    ? payload.stages.flatMap((stage) => {
+        if (!stage || typeof stage !== "object") return [];
+        const id = "id" in stage && typeof stage.id === "string" ? stage.id : "stage";
+        const label = "label" in stage && typeof stage.label === "string" ? stage.label : id;
+        const matrix = "matrix" in stage && Array.isArray(stage.matrix) ? (stage.matrix as number[][]) : [];
+        const channels =
+          "channels" in stage && Array.isArray(stage.channels)
+            ? stage.channels.flatMap((channel) => {
+                if (!channel || typeof channel !== "object") return [];
+                const channelId = "id" in channel && typeof channel.id === "string" ? channel.id : "channel";
+                const channelLabel = "label" in channel && typeof channel.label === "string" ? channel.label : channelId;
+                const nodeId = "nodeId" in channel && typeof channel.nodeId === "string" ? channel.nodeId : null;
+                const channelMatrix = "matrix" in channel && Array.isArray(channel.matrix) ? (channel.matrix as number[][]) : [];
+                const score = "score" in channel && typeof channel.score === "number" ? channel.score : null;
+                return [{ id: channelId, label: channelLabel, nodeId, matrix: channelMatrix, score }];
+              })
+            : [];
+        return [{ id, label, matrix, channels }];
+      })
+    : [];
+  const topClasses = Array.isArray(payload?.topClasses)
+    ? payload.topClasses.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const label = "label" in entry && typeof entry.label === "string" ? entry.label : null;
+        const value = "value" in entry && typeof entry.value === "number" ? entry.value : null;
+        return label && value !== null ? [{ label, value }] : [];
+      })
+    : [];
+  const [selectedStageIndex, setSelectedStageIndex] = useState(0);
+  const selectedStage = stages[Math.min(selectedStageIndex, Math.max(stages.length - 1, 0))] ?? null;
+  const [selectedChannelIndex, setSelectedChannelIndex] = useState(0);
+  const selectedChannel = selectedStage?.channels[Math.min(selectedChannelIndex, Math.max((selectedStage?.channels.length ?? 1) - 1, 0))] ?? null;
+
+  useEffect(() => {
+    setSelectedChannelIndex(0);
+  }, [selectedStageIndex, payload?.headline]);
+
+  return (
+    <section className="panel-section">
+      <header className="panel-section__header">
+        <span>Feature Explorer</span>
+        <strong>{selectedStage?.label ?? "No stage"}</strong>
+      </header>
+      <div className="focus-group">
+        <span className="focus-group__label">Stages</span>
+        <div className="focus-group__chips">
+          {stages.map((stage, index) => (
+            <button
+              key={stage.id}
+              type="button"
+              className={selectedStageIndex === index ? "focus-chip is-active" : "focus-chip"}
+              onClick={() => {
+                setSelectedStageIndex(index);
+                onSelect({ id: stage.id, kind: "node" });
+              }}
+            >
+              {stage.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {selectedStage ? (
+        <div className="family-slice">
+          <div className="family-slice__meta">
+            <span>Stage map</span>
+            <strong>{selectedStage.label}</strong>
+          </div>
+          <MatrixHeatmap matrix={selectedStage.matrix} />
+        </div>
+      ) : null}
+      {selectedStage?.channels.length ? (
+        <div className="focus-group">
+          <span className="focus-group__label">Channels</span>
+          <div className="focus-group__chips">
+            {selectedStage.channels.map((channel, index) => (
+              <button
+                key={channel.id}
+                type="button"
+                className={selectedChannelIndex === index ? "focus-chip is-active" : "focus-chip"}
+                onClick={() => {
+                  setSelectedChannelIndex(index);
+                  if (channel.nodeId) onSelect({ id: channel.nodeId, kind: "node" });
+                }}
+              >
+                {channel.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {selectedChannel ? (
+        <div className="family-slice">
+          <div className="family-slice__meta">
+            <span>Channel response</span>
+            <strong>{selectedChannel.score !== null ? formatMetric(selectedChannel.score) : selectedChannel.label}</strong>
+          </div>
+          <MatrixHeatmap matrix={selectedChannel.matrix} />
+        </div>
+      ) : null}
+      {topClasses.length > 0 ? (
+        <div className="detail-card">
+          <strong>Top classes</strong>
+          <div className="detail-stats">
+            {topClasses.map((entry) => (
+              <div key={entry.label} className="detail-stat">
+                <span>{entry.label}</span>
+                <strong>{formatMetric(entry.value)}</strong>
               </div>
             ))}
           </div>
