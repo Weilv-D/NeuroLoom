@@ -103,6 +103,13 @@ export function App() {
   const currentChapter =
     bundle?.narrative.chapters.find((chapter) => chapter.id === activeChapterId) ??
     (engine ? engine.getChapterForFrame(frameIndex) ?? null : null);
+  const activeTrace = officialTraces.find((trace) => trace.id === traceId) ?? officialTraces.find((trace) => trace.family === bundle?.manifest.family);
+  const currentChapterIndex = currentChapter && bundle ? bundle.narrative.chapters.findIndex((chapter) => chapter.id === currentChapter.id) : -1;
+  const renderPayloadId =
+    bundle && deferredFrame
+      ? bundle.manifest.payload_catalog.find((entry) => entry.kind === "render" && deferredFrame.payload_refs.includes(entry.id))?.id ?? null
+      : null;
+  const renderPayload = bundle && renderPayloadId ? parsePayload(bundle.payloads.get(renderPayloadId)) : null;
 
   async function exportStageSnapshot() {
     if (!traceId || !deferredFrame) return;
@@ -216,35 +223,87 @@ export function App() {
               <p className="muted-copy">{bundle.narrative.intro}</p>
             </section>
 
-            <section className="panel-section">
-              <header className="panel-section__header">
-                <span>{mode === "story" ? "Chapters" : "Story Anchors"}</span>
-                <strong>{bundle.narrative.chapters.length} stops</strong>
-              </header>
-              <div className="stack-list">
-                {bundle.narrative.chapters.map((chapter) => (
-                  <button
-                    key={chapter.id}
-                    type="button"
-                    className={chapter.id === currentChapter?.id ? "stack-item is-active" : "stack-item"}
-                    onClick={() => jumpToChapter(chapter.id)}
-                  >
-                    <span>{chapter.label}</span>
-                    <small>
-                      {chapter.frameRange[0]}–{chapter.frameRange[1]}
-                    </small>
-                  </button>
-                ))}
-              </div>
-            </section>
+            {mode === "story" ? (
+              <>
+                <section className="panel-section">
+                  <header className="panel-section__header">
+                    <span>Narrative Track</span>
+                    <strong>{bundle.narrative.chapters.length} chapters</strong>
+                  </header>
+                  <div className="stack-list">
+                    {bundle.narrative.chapters.map((chapter, index) => (
+                      <button
+                        key={chapter.id}
+                        type="button"
+                        className={chapter.id === currentChapter?.id ? "stack-item is-active stack-item--story" : "stack-item stack-item--story"}
+                        onClick={() => jumpToChapter(chapter.id)}
+                      >
+                        <div>
+                          <span>{chapter.label}</span>
+                          <small>{chapter.description}</small>
+                        </div>
+                        <small>
+                          {index + 1}/{bundle.narrative.chapters.length}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
 
-            <section className="panel-section">
-              <header className="panel-section__header">
-                <span>Structure</span>
-                <strong>{bundle.graph.nodes.length} nodes</strong>
-              </header>
-              <StructureList bundle={bundle} selection={selection} onSelect={setSelection} />
-            </section>
+                {activeTrace ? (
+                  <section className="panel-section">
+                    <header className="panel-section__header">
+                      <span>Watch For</span>
+                      <strong>{activeTrace.family}</strong>
+                    </header>
+                    <p className="story-title">{activeTrace.storyTitle}</p>
+                    <KeyList items={activeTrace.watchFor} />
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <section className="panel-section">
+                  <header className="panel-section__header">
+                    <span>Story Anchors</span>
+                    <strong>{bundle.narrative.chapters.length} stops</strong>
+                  </header>
+                  <div className="stack-list">
+                    {bundle.narrative.chapters.map((chapter) => (
+                      <button
+                        key={chapter.id}
+                        type="button"
+                        className={chapter.id === currentChapter?.id ? "stack-item is-active" : "stack-item"}
+                        onClick={() => jumpToChapter(chapter.id)}
+                      >
+                        <span>{chapter.label}</span>
+                        <small>
+                          {chapter.frameRange[0]}–{chapter.frameRange[1]}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel-section">
+                  <header className="panel-section__header">
+                    <span>Structure</span>
+                    <strong>{bundle.graph.nodes.length} nodes</strong>
+                  </header>
+                  <StructureList bundle={bundle} selection={selection} onSelect={setSelection} />
+                </section>
+
+                {activeTrace ? (
+                  <section className="panel-section">
+                    <header className="panel-section__header">
+                      <span>Studio Tips</span>
+                      <strong>3 prompts</strong>
+                    </header>
+                    <KeyList items={activeTrace.studioTips} />
+                  </section>
+                ) : null}
+              </>
+            )}
           </aside>
 
           <section className="stage-column">
@@ -267,6 +326,14 @@ export function App() {
                   </div>
                 ) : null}
               </div>
+              <div className="stage-frame__lens">
+                <RenderLens payload={renderPayload} family={bundle.manifest.family} mode={mode} />
+              </div>
+              <div className="stage-frame__legend">
+                <LegendPill colorClass="is-electric" label="Activation / forward flow" />
+                <LegendPill colorClass="is-amber" label="Compression / backward pressure" />
+                <LegendPill colorClass="is-lime" label="Selection / chapter focus" />
+              </div>
               <SceneCanvas bundle={bundle} frame={deferredFrame} selection={selection} onSelect={setSelection} />
             </div>
             <TimelineBar
@@ -280,11 +347,29 @@ export function App() {
               onNext={() => step(1)}
               onTogglePlay={togglePlaying}
               onExport={() => void exportStageSnapshot()}
+              onPrevChapter={() => {
+                if (!bundle || currentChapterIndex <= 0) return;
+                jumpToChapter(bundle.narrative.chapters[currentChapterIndex - 1]!.id);
+              }}
+              onNextChapter={() => {
+                if (!bundle || currentChapterIndex < 0 || currentChapterIndex >= bundle.narrative.chapters.length - 1) return;
+                jumpToChapter(bundle.narrative.chapters[currentChapterIndex + 1]!.id);
+              }}
             />
           </section>
 
           <aside className="panel panel--right">
-            <InspectorPanel bundle={bundle} frame={deferredFrame} selection={selection} chapter={currentChapter?.description ?? null} />
+            {mode === "story" ? (
+              <StoryPanel
+                bundle={bundle}
+                frame={deferredFrame}
+                chapter={currentChapter}
+                activeTraceTitle={activeTrace?.storyTitle ?? null}
+                watchFor={activeTrace?.watchFor ?? []}
+              />
+            ) : (
+              <InspectorPanel bundle={bundle} frame={deferredFrame} selection={selection} chapter={currentChapter?.description ?? null} />
+            )}
           </aside>
         </main>
       ) : null}
@@ -312,7 +397,9 @@ function TimelineBar({
   onPrev,
   onNext,
   onTogglePlay,
-  onExport
+  onExport,
+  onPrevChapter,
+  onNextChapter
 }: {
   frame: TraceFrame;
   frameIndex: number;
@@ -324,6 +411,8 @@ function TimelineBar({
   onNext(): void;
   onTogglePlay(): void;
   onExport(): void;
+  onPrevChapter(): void;
+  onNextChapter(): void;
 }) {
   return (
     <div className="timeline">
@@ -354,7 +443,15 @@ function TimelineBar({
             Frame {frame.frame_id + 1} / {frameCount}
           </span>
           <span>{chapter ?? "Free scrub"}</span>
-          <span>`Space` play · `←/→` step · `S` export</span>
+          <span className="timeline__hotkeys">`Space` play · `←/→` step · `S` export</span>
+          <div className="timeline__chapter-nav">
+            <button type="button" className="chip chip--ghost" onClick={onPrevChapter}>
+              Prev Chapter
+            </button>
+            <button type="button" className="chip chip--ghost" onClick={onNextChapter}>
+              Next Chapter
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -472,6 +569,124 @@ function InspectorPanel({
         )}
       </section>
     </>
+  );
+}
+
+function StoryPanel({
+  bundle,
+  frame,
+  chapter,
+  activeTraceTitle,
+  watchFor
+}: {
+  bundle: TraceBundle;
+  frame: TraceFrame;
+  chapter: TraceBundle["narrative"]["chapters"][number] | null | undefined;
+  activeTraceTitle: string | null;
+  watchFor: readonly string[];
+}) {
+  return (
+    <>
+      <section className="panel-section">
+        <header className="panel-section__header">
+          <span>Story Focus</span>
+          <strong>{chapter?.label ?? "Current frame"}</strong>
+        </header>
+        <p className="story-title">{activeTraceTitle ?? bundle.manifest.summary}</p>
+        <p className="muted-copy">{chapter?.description ?? frame.note ?? "No chapter description available."}</p>
+      </section>
+
+      <section className="panel-section">
+        <header className="panel-section__header">
+          <span>Chapter Metrics</span>
+          <strong>{frame.metric_refs.length} values</strong>
+        </header>
+        <div className="metric-grid">
+          {frame.metric_refs.map((metric) => (
+            <article key={metric.id} className="metric-card">
+              <span>{metric.label}</span>
+              <strong>{formatMetric(metric.value)}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel-section">
+        <header className="panel-section__header">
+          <span>What To Watch</span>
+          <strong>{watchFor.length} cues</strong>
+        </header>
+        <KeyList items={watchFor} />
+      </section>
+
+      <section className="panel-section">
+        <header className="panel-section__header">
+          <span>Current Note</span>
+          <strong>{frame.phase}</strong>
+        </header>
+        <div className="detail-card">
+          <strong>{bundle.manifest.title}</strong>
+          <p>{frame.note ?? "This frame has no additional note."}</p>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function RenderLens({
+  payload,
+  family,
+  mode
+}: {
+  payload: Record<string, unknown> | null;
+  family: TraceBundle["manifest"]["family"];
+  mode: "story" | "studio";
+}) {
+  const matrix = Array.isArray(payload?.matrix) ? (payload.matrix as number[][]) : null;
+  const series = Array.isArray(payload?.series) ? (payload.series as Array<{ label: string; value: number }>) : null;
+  const headline = typeof payload?.headline === "string" ? payload.headline : "Render lens";
+
+  return (
+    <div className="render-lens">
+      <div className="render-lens__header">
+        <span>{mode === "story" ? "Story Lens" : "Render Lens"}</span>
+        <strong>{family}</strong>
+      </div>
+      <p className="render-lens__title">{headline}</p>
+      {matrix ? <MatrixHeatmap matrix={matrix.slice(0, 6).map((row) => row.slice(0, 6))} /> : null}
+      {series ? (
+        <div className="render-lens__series">
+          {series.slice(0, 3).map((item) => (
+            <div key={item.label} className="render-lens__series-item">
+              <span>{item.label}</span>
+              <strong>{formatMetric(item.value)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LegendPill({ colorClass, label }: { colorClass: string; label: string }) {
+  return (
+    <span className={`legend-pill ${colorClass}`}>
+      <i />
+      {label}
+    </span>
+  );
+}
+
+function KeyList({ items }: { items: readonly string[] }) {
+  return (
+    <div className="key-list">
+      {items.map((item) => (
+        <article key={item} className="key-list__item">
+          <span className="key-list__marker" />
+          <p>{item}</p>
+        </article>
+      ))}
+    </div>
   );
 }
 

@@ -76,6 +76,7 @@ Supported phases:
 
 Formal reference:
 
+- [docs/index.md](docs/index.md)
 - [docs/loomtrace-spec.md](docs/loomtrace-spec.md)
 
 ## Getting Started
