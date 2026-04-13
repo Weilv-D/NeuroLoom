@@ -1,5 +1,5 @@
 import type { TraceBundle, TraceFrame } from "@neuroloom/core";
-import { startTransition, useDeferredValue, useEffect, useId } from "react";
+import { startTransition, useDeferredValue, useEffect, useId, useRef } from "react";
 import { scaleLinear } from "d3-scale";
 
 import { SceneCanvas } from "./SceneCanvas";
@@ -31,6 +31,7 @@ export function App() {
     jumpToChapter
   } = useStudioStore();
   const uploadId = useId();
+  const stageFrameRef = useRef<HTMLDivElement | null>(null);
 
   async function ingestTrace(nextTraceId: string, loader: () => Promise<TraceBundle>) {
     beginLoading(nextTraceId);
@@ -65,11 +66,63 @@ export function App() {
     return () => window.clearInterval(intervalId);
   }, [playing, engine]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) {
+        return;
+      }
+      if (!useStudioStore.getState().engine) return;
+      if (event.key === " ") {
+        event.preventDefault();
+        useStudioStore.getState().togglePlaying();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        useStudioStore.getState().step(-1);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        useStudioStore.getState().step(1);
+        return;
+      }
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void exportStageSnapshot();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [traceId, deferredFrame, failLoading]);
+
   const frame = engine ? engine.getFrame(frameIndex) : null;
   const deferredFrame = useDeferredValue(frame);
   const currentChapter =
     bundle?.narrative.chapters.find((chapter) => chapter.id === activeChapterId) ??
     (engine ? engine.getChapterForFrame(frameIndex) ?? null : null);
+
+  async function exportStageSnapshot() {
+    if (!traceId || !deferredFrame) return;
+    const canvas = stageFrameRef.current?.querySelector("canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      failLoading("Snapshot export failed: stage canvas is unavailable.");
+      return;
+    }
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) {
+      failLoading("Snapshot export failed: browser could not create a PNG.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${traceId}-frame-${String(deferredFrame.frame_id).padStart(3, "0")}.png`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="app-shell">
@@ -128,6 +181,9 @@ export function App() {
           ) : null}
         </div>
         <div className="toolbar__group">
+          <button type="button" className="chip" onClick={() => void exportStageSnapshot()} disabled={!bundle}>
+            Export PNG
+          </button>
           <label htmlFor={uploadId} className="chip chip--file">
             Import `.loomtrace`
           </label>
@@ -192,7 +248,7 @@ export function App() {
           </aside>
 
           <section className="stage-column">
-            <div className="stage-frame">
+            <div className="stage-frame" ref={stageFrameRef}>
               <div className="stage-frame__overlay">
                 <div>
                   <span className="overlay-label">Phase</span>
@@ -223,6 +279,7 @@ export function App() {
               onPrev={() => step(-1)}
               onNext={() => step(1)}
               onTogglePlay={togglePlaying}
+              onExport={() => void exportStageSnapshot()}
             />
           </section>
 
@@ -254,7 +311,8 @@ function TimelineBar({
   onSeek,
   onPrev,
   onNext,
-  onTogglePlay
+  onTogglePlay,
+  onExport
 }: {
   frame: TraceFrame;
   frameIndex: number;
@@ -265,6 +323,7 @@ function TimelineBar({
   onPrev(): void;
   onNext(): void;
   onTogglePlay(): void;
+  onExport(): void;
 }) {
   return (
     <div className="timeline">
@@ -277,6 +336,9 @@ function TimelineBar({
         </button>
         <button type="button" className="chip" onClick={onNext}>
           Next
+        </button>
+        <button type="button" className="chip" onClick={onExport}>
+          PNG
         </button>
       </div>
       <div className="timeline__track">
@@ -292,7 +354,7 @@ function TimelineBar({
             Frame {frame.frame_id + 1} / {frameCount}
           </span>
           <span>{chapter ?? "Free scrub"}</span>
-          <span>{frame.phase}</span>
+          <span>`Space` play · `←/→` step · `S` export</span>
         </div>
       </div>
     </div>

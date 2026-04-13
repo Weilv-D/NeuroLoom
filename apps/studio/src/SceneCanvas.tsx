@@ -18,7 +18,7 @@ export function SceneCanvas({ bundle, frame, selection, onSelect }: SceneCanvasP
   return (
     <div className="scene-stage">
       <Canvas
-        gl={{ antialias: true }}
+        gl={{ antialias: true, preserveDrawingBuffer: true }}
         dpr={[1, 1.8]}
         onCreated={({ gl }) => {
           gl.setClearColor("#050710");

@@ -74,6 +74,10 @@ Supported phases:
 - `update`
 - `decode`
 
+Formal reference:
+
+- [docs/loomtrace-spec.md](docs/loomtrace-spec.md)
+
 ## Getting Started
 Requirements:
 
