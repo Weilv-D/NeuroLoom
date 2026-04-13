@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    host: true, // Listen on all local IPs
+  },
   assetsInclude: ["**/*.onnx"],
   optimizeDeps: {
     exclude: ["onnxruntime-web"],
