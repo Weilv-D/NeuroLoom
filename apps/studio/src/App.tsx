@@ -368,7 +368,14 @@ export function App() {
                 watchFor={activeTrace?.watchFor ?? []}
               />
             ) : (
-              <InspectorPanel bundle={bundle} frame={deferredFrame} selection={selection} chapter={currentChapter?.description ?? null} />
+              <InspectorPanel
+                bundle={bundle}
+                frame={deferredFrame}
+                selection={selection}
+                chapter={currentChapter?.description ?? null}
+                activeTrace={activeTrace ?? null}
+                onSelect={setSelection}
+              />
             )}
           </aside>
         </main>
@@ -498,12 +505,16 @@ function InspectorPanel({
   bundle,
   frame,
   selection,
-  chapter
+  chapter,
+  activeTrace,
+  onSelect
 }: {
   bundle: TraceBundle;
   frame: TraceFrame;
   selection: SelectionState;
   chapter: string | null;
+  activeTrace: (typeof officialTraces)[number] | null;
+  onSelect(selection: SelectionState): void;
 }) {
   const inspectPayloadId =
     bundle.manifest.payload_catalog.find((entry) => entry.kind === "inspect" && frame.payload_refs.includes(entry.id))?.id ?? null;
@@ -515,6 +526,8 @@ function InspectorPanel({
 
   return (
     <>
+      <FamilyFocusPanel bundle={bundle} selection={selection} onSelect={onSelect} payload={inspectPayload} activeTrace={activeTrace} />
+
       <section className="panel-section">
         <header className="panel-section__header">
           <span>Narrative Notes</span>
@@ -569,6 +582,60 @@ function InspectorPanel({
         )}
       </section>
     </>
+  );
+}
+
+function FamilyFocusPanel({
+  bundle,
+  selection,
+  onSelect,
+  payload,
+  activeTrace
+}: {
+  bundle: TraceBundle;
+  selection: SelectionState;
+  onSelect(selection: SelectionState): void;
+  payload: Record<string, unknown> | null;
+  activeTrace: (typeof officialTraces)[number] | null;
+}) {
+  const groups = getFamilyFocusGroups(bundle);
+  const matrix = Array.isArray(payload?.matrix) ? (payload.matrix as number[][]) : null;
+  const headline = typeof payload?.headline === "string" ? payload.headline : bundle.manifest.title;
+
+  return (
+    <section className="panel-section">
+      <header className="panel-section__header">
+        <span>Family Focus</span>
+        <strong>{bundle.manifest.family}</strong>
+      </header>
+      <p className="muted-copy">{activeTrace?.studioTips[0] ?? "Use these shortcuts to jump between the most meaningful nodes for this model family."}</p>
+      <div className="focus-groups">
+        {groups.map((group) => (
+          <div key={group.label} className="focus-group">
+            <span className="focus-group__label">{group.label}</span>
+            <div className="focus-group__chips">
+              {group.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={selection?.id === item.id ? "focus-chip is-active" : "focus-chip"}
+                  onClick={() => onSelect({ id: item.id, kind: "node" })}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="family-slice">
+        <div className="family-slice__meta">
+          <span>{headline}</span>
+          <strong>{bundle.manifest.family === "transformer" ? "attention slice" : bundle.manifest.family === "cnn" ? "feature slice" : "decision slice"}</strong>
+        </div>
+        {matrix ? <MatrixHeatmap matrix={matrix.slice(0, 5).map((row) => row.slice(0, 5))} /> : <p className="muted-copy">No matrix payload.</p>}
+      </div>
+    </section>
   );
 }
 
@@ -688,6 +755,37 @@ function KeyList({ items }: { items: readonly string[] }) {
       ))}
     </div>
   );
+}
+
+function getFamilyFocusGroups(bundle: TraceBundle) {
+  const nodes = bundle.graph.nodes;
+  const take = (ids: string[]) =>
+    ids
+      .map((id) => nodes.find((node) => node.id === id))
+      .filter((node): node is TraceBundle["graph"]["nodes"][number] => Boolean(node))
+      .map((node) => ({ id: node.id, label: node.label }));
+
+  if (bundle.manifest.family === "mlp") {
+    return [
+      { label: "Inputs", items: take(["input-x", "input-y"]) },
+      { label: "Hidden", items: take(["hidden-a", "hidden-b", "hidden-c", "mix-a", "mix-b"]) },
+      { label: "Readout", items: take(["output", "loss"]) }
+    ].filter((group) => group.items.length > 0);
+  }
+
+  if (bundle.manifest.family === "cnn") {
+    return [
+      { label: "Image + Stage", items: take(["image", "stage-1", "stage-2"]) },
+      { label: "Feature Maps", items: take(["conv-1", "pool-1", "conv-2", "pool-2"]) },
+      { label: "Head", items: take(["dense", "output", "loss"]) }
+    ].filter((group) => group.items.length > 0);
+  }
+
+  return [
+    { label: "Tokens", items: take(["token-bos", "token-neuro", "token-loom", "token-glows"]) },
+    { label: "Block", items: take(["embed", "attn", "residual", "mlp", "norm"]) },
+    { label: "Decode", items: take(["logits", "decode"]) }
+  ].filter((group) => group.items.length > 0);
 }
 
 function PayloadView({ payload }: { payload: Record<string, unknown> }) {
