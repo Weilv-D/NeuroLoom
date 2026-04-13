@@ -1,5 +1,5 @@
 import type { TraceBundle, TraceFrame } from "@neuroloom/core";
-import { startTransition, useDeferredValue, useEffect, useId, useRef } from "react";
+import { startTransition, useDeferredValue, useEffect, useId, useRef, useState } from "react";
 import { scaleLinear } from "d3-scale";
 
 import { SceneCanvas } from "./SceneCanvas";
@@ -559,6 +559,10 @@ function InspectorPanel({
         {inspectPayload ? <PayloadView payload={inspectPayload} /> : <p className="muted-copy">No inspect payload.</p>}
       </section>
 
+      {bundle.manifest.family === "transformer" ? (
+        <TransformerAttentionPanel bundle={bundle} payload={inspectPayload} selection={selection} onSelect={onSelect} />
+      ) : null}
+
       <section className="panel-section">
         <header className="panel-section__header">
           <span>Structure</span>
@@ -582,6 +586,144 @@ function InspectorPanel({
         )}
       </section>
     </>
+  );
+}
+
+function TransformerAttentionPanel({
+  bundle,
+  payload,
+  selection,
+  onSelect
+}: {
+  bundle: TraceBundle;
+  payload: Record<string, unknown> | null;
+  selection: SelectionState;
+  onSelect(selection: SelectionState): void;
+}) {
+  const heads = Array.isArray(payload?.heads)
+    ? payload.heads.flatMap((head) => {
+        if (!head || typeof head !== "object") return [];
+        const id = "id" in head && typeof head.id === "string" ? head.id : "head";
+        const label = "label" in head && typeof head.label === "string" ? head.label : id;
+        const matrix = "matrix" in head && Array.isArray(head.matrix) ? (head.matrix as number[][]) : [];
+        const focusTokenIndex =
+          "focusTokenIndex" in head && typeof head.focusTokenIndex === "number" ? head.focusTokenIndex : 0;
+        const score = "score" in head && typeof head.score === "number" ? head.score : null;
+        return [{ id, label, matrix, focusTokenIndex, score }];
+      })
+    : [];
+  const tokens = Array.isArray(payload?.tokens) ? payload.tokens.filter((entry): entry is string => typeof entry === "string") : [];
+  const topTokens = Array.isArray(payload?.topTokens)
+    ? payload.topTokens.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const token = "token" in entry && typeof entry.token === "string" ? entry.token : null;
+        const probability = "probability" in entry && typeof entry.probability === "number" ? entry.probability : null;
+        return token && probability !== null ? [{ token, probability }] : [];
+      })
+    : [];
+  const [selectedHeadIndex, setSelectedHeadIndex] = useState(0);
+  const [selectedTokenIndex, setSelectedTokenIndex] = useState(0);
+
+  useEffect(() => {
+    setSelectedHeadIndex(0);
+  }, [bundle.manifest.model_id, payload?.headline]);
+
+  useEffect(() => {
+    if (heads.length === 0) return;
+    const suggestedToken = heads[selectedHeadIndex]?.focusTokenIndex ?? 0;
+    setSelectedTokenIndex(Math.max(0, Math.min(suggestedToken, Math.max(tokens.length - 1, 0))));
+  }, [selectedHeadIndex, heads.length, payload?.headline, tokens.length]);
+
+  const selectedHead = heads[Math.min(selectedHeadIndex, Math.max(heads.length - 1, 0))] ?? null;
+  const selectedToken = tokens[Math.min(selectedTokenIndex, Math.max(tokens.length - 1, 0))] ?? null;
+  const tokenNodes = bundle.graph.nodes.filter((node) => node.type === "token").sort((left, right) => left.order - right.order);
+  const selectedRow =
+    selectedHead && selectedHead.matrix[selectedTokenIndex]
+      ? selectedHead.matrix[selectedTokenIndex]!.map((value, index) => ({
+          token: tokens[index] ?? `token-${index}`,
+          value
+        }))
+      : [];
+
+  return (
+    <section className="panel-section">
+      <header className="panel-section__header">
+        <span>Attention Explorer</span>
+        <strong>{selectedHead?.label ?? "No head"}</strong>
+      </header>
+      <div className="focus-groups">
+        <div className="focus-group">
+          <span className="focus-group__label">Heads</span>
+          <div className="focus-group__chips">
+            {heads.map((head, index) => (
+              <button
+                key={head.id}
+                type="button"
+                className={selectedHeadIndex === index ? "focus-chip is-active" : "focus-chip"}
+                onClick={() => setSelectedHeadIndex(index)}
+              >
+                {head.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="focus-group">
+          <span className="focus-group__label">Tokens</span>
+          <div className="focus-group__chips">
+            {tokenNodes.map((node, index) => (
+              <button
+                key={node.id}
+                type="button"
+                className={selectedTokenIndex === index || selection?.id === node.id ? "focus-chip is-active" : "focus-chip"}
+                onClick={() => {
+                  setSelectedTokenIndex(index);
+                  onSelect({ id: node.id, kind: "node" });
+                }}
+              >
+                {node.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {selectedHead ? (
+        <div className="family-slice">
+          <div className="family-slice__meta">
+            <span>{selectedToken ? `${selectedHead.label} on ${selectedToken}` : selectedHead.label}</span>
+            <strong>{selectedHead.score !== null ? formatMetric(selectedHead.score) : "focused row"}</strong>
+          </div>
+          <MatrixHeatmap matrix={selectedHead.matrix} />
+        </div>
+      ) : null}
+      {selectedRow.length > 0 ? (
+        <div className="token-bars">
+          {selectedRow.map((entry) => (
+            <div key={entry.token} className="token-bars__item">
+              <div className="token-bars__meta">
+                <span>{entry.token}</span>
+                <strong>{formatMetric(entry.value)}</strong>
+              </div>
+              <div className="series-bar__track">
+                <div className="series-bar__fill" style={{ width: `${Math.max(6, entry.value * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {topTokens.length > 0 ? (
+        <div className="detail-card">
+          <strong>Decode candidates</strong>
+          <div className="detail-stats">
+            {topTokens.map((entry) => (
+              <div key={entry.token} className="detail-stat">
+                <span>{entry.token}</span>
+                <strong>{formatMetric(entry.probability)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

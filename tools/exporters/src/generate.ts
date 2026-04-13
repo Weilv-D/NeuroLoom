@@ -374,7 +374,9 @@ function createTransformerTrace(): TraceBundle {
     const confidence = 0.28 + t * 0.48;
     const renderId = `transformer-render-${frame}`;
     const inspectId = `transformer-inspect-${frame}`;
-    const attention = createAttentionMatrix(4, t);
+    const tokens = ["<bos>", "neuro", "loom", "glows"];
+    const headMatrices = createAttentionHeads(tokens.length, t);
+    const attention = averageMatrices(headMatrices);
 
     payloadCatalog.push(payloadEntry(renderId, "render"), payloadEntry(inspectId, "inspect"));
     payloads.set(
@@ -387,7 +389,13 @@ function createTransformerTrace(): TraceBundle {
           { label: "decode progress", value: round(t) }
         ],
         matrix: attention,
-        tokens: ["<bos>", "neuro", "loom", "glows"]
+        tokens,
+        heads: headMatrices.map((matrix, index) => ({
+          id: `head-${index}`,
+          label: `Head ${index + 1}`,
+          matrix,
+          focusTokenIndex: (index + Math.round(t * 2)) % tokens.length
+        }))
       })
     );
     payloads.set(
@@ -400,6 +408,19 @@ function createTransformerTrace(): TraceBundle {
           { label: "top-1 prob", value: round(confidence) }
         ],
         matrix: attention,
+        tokens,
+        heads: headMatrices.map((matrix, index) => ({
+          id: `head-${index}`,
+          label: `Head ${index + 1}`,
+          matrix,
+          focusTokenIndex: (index + Math.round(t * 2)) % tokens.length,
+          score: round(0.34 + index * 0.11 + t * 0.18)
+        })),
+        topTokens: [
+          { token: "glows", probability: round(0.34 + t * 0.22) },
+          { token: "bright", probability: round(0.22 + t * 0.12) },
+          { token: "again", probability: round(0.14 - t * 0.03) }
+        ],
         selectionDetails: {
           attn: detail("Multi-head attention", "Queries concentrate from a wide glow into a tighter token path.", [metric("head 0 max", attention[0]![1]!), metric("head 3 max", attention[3]![2]!)]),
           residual: detail("Residual stream", "The residual band keeps information visible between the attention and MLP sublayers.", [metric("stream norm", 0.88 - t * 0.16), metric("focus", 0.36 + t * 0.3)]),
@@ -557,6 +578,31 @@ function createAttentionMatrix(size: number, t: number) {
       const sharpen = Math.max(0, Math.sin(t * 5 + row * 0.7 + column * 0.3)) * 0.3;
       return round(clamp(base * (0.55 + t * 0.4) + sharpen, 0, 1));
     })
+  );
+}
+
+function createAttentionHeads(size: number, t: number) {
+  return Array.from({ length: 4 }, (_, headIndex) =>
+    Array.from({ length: size }, (_, row) =>
+      Array.from({ length: size }, (_, column) => {
+        const locality = Math.max(0, 0.72 - Math.abs(row - column) * (0.1 + headIndex * 0.03));
+        const drift = Math.max(0, Math.sin(t * (4.2 + headIndex * 0.4) + row * 0.8 + column * (0.25 + headIndex * 0.1))) * 0.26;
+        const focusBias = row === ((headIndex + Math.round(t * 3)) % size) ? 0.18 : 0;
+        return round(clamp(0.08 + locality * (0.52 + t * 0.24) + drift + focusBias, 0, 1));
+      })
+    )
+  );
+}
+
+function averageMatrices(matrices: number[][][]) {
+  if (matrices.length === 0) return [];
+  const rows = matrices[0]!.length;
+  const columns = matrices[0]![0]!.length;
+
+  return Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: columns }, (_, column) =>
+      round(matrices.reduce((sum, matrix) => sum + (matrix[row]?.[column] ?? 0), 0) / matrices.length)
+    )
   );
 }
 

@@ -671,6 +671,24 @@ code {
   font-size: 13px;
 }
 
+.token-bars {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.token-bars__item {
+  display: grid;
+  gap: 6px;
+}
+
+.token-bars__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
 .story-title {
   margin: 0 0 12px;
   font-size: 20px;
