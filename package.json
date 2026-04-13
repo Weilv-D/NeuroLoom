@@ -10,5 +10,8 @@
     "generate:traces": "pnpm --filter @neuroloom/core build && pnpm --filter @neuroloom/exporters generate",
     "test": "pnpm generate:traces && pnpm -r --if-present test",
     "validate:samples": "pnpm generate:traces && pnpm --filter @neuroloom/core loomtrace ../../apps/studio/public/traces/spiral-2d-mlp.loomtrace ../../apps/studio/public/traces/fashion-mnist-cnn.loomtrace ../../apps/studio/public/traces/tiny-gpt-style-transformer.loomtrace"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17"
   }
 }
