@@ -1,44 +1,8 @@
-import type { TraceBundle, TraceFamily, TraceFrame } from "@neuroloom/core";
+import fs from "fs";
 
-export const officialTraceIds = ["tiny-mlp-mixer", "tiny-convnext", "tiny-llama"] as const;
+let content = fs.readFileSync("packages/official-traces/src/index.ts", "utf-8");
 
-export type OfficialTraceId = (typeof officialTraceIds)[number];
-
-type PayloadCatalogEntry = TraceBundle["manifest"]["payload_catalog"][number];
-type GraphNode = TraceBundle["graph"]["nodes"][number];
-type GraphEdge = TraceBundle["graph"]["edges"][number];
-type CameraPreset = TraceBundle["manifest"]["camera_presets"][number];
-type NarrativeChapter = TraceBundle["narrative"]["chapters"][number];
-
-const visualSemantics = {
-  positive: "#15f0ff",
-  negative: "#ffb45b",
-  focus: "#d8ff66",
-  neutral: "#eef2ff",
-  bloomStrength: 1.45,
-  fogDensity: 0.05,
-} satisfies TraceBundle["manifest"]["visual_semantics"];
-
-export function createOfficialTraceBundles(): TraceBundle[] {
-  return [createMlpMixerTrace(), createConvNextTrace(), createLlamaTrace()];
-}
-
-export function createOfficialTraceBundle(id: OfficialTraceId): TraceBundle {
-  switch (id) {
-    case "tiny-mlp-mixer":
-      return createMlpMixerTrace();
-    case "tiny-convnext":
-      return createConvNextTrace();
-    case "tiny-llama":
-      return createLlamaTrace();
-  }
-}
-
-export function isOfficialTraceId(id: string): id is OfficialTraceId {
-  return officialTraceIds.includes(id as OfficialTraceId);
-}
-
-function createMlpMixerTrace(): TraceBundle {
+const newMlpMixer = `function createMlpMixerTrace(): TraceBundle {
   const nodes: GraphNode[] = [
     node("patch", "Patch Embed", "input", 0, 0, -6, 2, 0, { patches: 16 }),
     node("token-mix-1", "Token Mix", "linear", 1, 0, -3, 3, -2, { type: "spatial" }),
@@ -75,7 +39,7 @@ function createMlpMixerTrace(): TraceBundle {
     });
   }
   
-  payloads.set("inspect-1", JSON.stringify({ headline: "MLP Mixer", series: [], matrix: createMatrix(16, 16, (x, y) => Math.abs(Math.sin(x*0.5 + y*0.5)) * 0.8 + 0.2), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
+  payloads.set("inspect-1", JSON.stringify({ headline: "MLP Mixer", series: [], matrix: createMatrix(16, 16, () => 1), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
   payloadCatalog.push(payloadEntry("inspect-1", "inspect"));
 
   return {
@@ -89,9 +53,9 @@ function createMlpMixerTrace(): TraceBundle {
     graph: { nodes, edges, rootNodeIds: ["patch"] }, timeline, payloads,
     narrative: { intro: "MLP Mixer", chapters: [chapter("fwd", "Forward", [0, 4], "patch", "Run"), chapter("bwd", "Backward", [5, 9], "loss", "Run")] }
   };
-}
+}`;
 
-function createConvNextTrace(): TraceBundle {
+const newConvNext = `function createConvNextTrace(): TraceBundle {
   const nodes: GraphNode[] = [
     node("embed", "Patchify", "input", 0, 0, -8, 0, 0, { stride: 4 }),
     node("dwconv1", "DW Conv 7x7", "conv", 1, 0, -4, 4, -4, { kernel: 7 }),
@@ -119,7 +83,7 @@ function createConvNextTrace(): TraceBundle {
     });
   }
   
-  payloads.set("inspect-1", JSON.stringify({ headline: "ConvNeXt", series: [], matrix: createMatrix(16, 16, (x, y) => Math.abs(Math.sin(x*0.5 + y*0.5)) * 0.8 + 0.2), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
+  payloads.set("inspect-1", JSON.stringify({ headline: "ConvNeXt", series: [], matrix: createMatrix(16, 16, () => 1), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
   payloadCatalog.push(payloadEntry("inspect-1", "inspect"));
 
   return {
@@ -133,9 +97,9 @@ function createConvNextTrace(): TraceBundle {
     graph: { nodes, edges, rootNodeIds: ["embed"] }, timeline, payloads,
     narrative: { intro: "ConvNeXt", chapters: [chapter("fwd", "Forward", [0, 4], "embed", "Run"), chapter("bwd", "Backward", [5, 9], "head", "Run")] }
   };
-}
+}`;
 
-function createLlamaTrace(): TraceBundle {
+const newLlama = `function createLlamaTrace(): TraceBundle {
   const nodes: GraphNode[] = [
     node("embed", "Tokens", "token", 0, 0, -8, 0, 0, { vocab: 32000 }),
     node("rope", "RoPE", "embedding", 1, 0, -5, 4, -4, { type: "rotary" }),
@@ -163,7 +127,7 @@ function createLlamaTrace(): TraceBundle {
     });
   }
   
-  payloads.set("inspect-1", JSON.stringify({ headline: "Llama", series: [], matrix: createMatrix(16, 16, (x, y) => Math.abs(Math.sin(x*0.5 + y*0.5)) * 0.8 + 0.2), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
+  payloads.set("inspect-1", JSON.stringify({ headline: "Llama", series: [], matrix: createMatrix(16, 16, () => 1), tokens: [], heads: [], topTokens: [], selectionDetails: {} }));
   payloadCatalog.push(payloadEntry("inspect-1", "inspect"));
 
   return {
@@ -177,109 +141,10 @@ function createLlamaTrace(): TraceBundle {
     graph: { nodes, edges, rootNodeIds: ["embed"] }, timeline, payloads,
     narrative: { intro: "Llama", chapters: [chapter("fwd", "Forward", [0, 4], "embed", "Run"), chapter("bwd", "Backward", [5, 9], "head", "Run")] }
   };
-}
+}`;
 
+content = content.replace(/function createMlpMixerTrace\(\): TraceBundle \{[\s\S]*?\}\n\nfunction createConvNextTrace/g, newMlpMixer + "\n\nfunction createConvNextTrace");
+content = content.replace(/function createConvNextTrace\(\): TraceBundle \{[\s\S]*?\}\n\nfunction createLlamaTrace/g, newConvNext + "\n\nfunction createLlamaTrace");
+content = content.replace(/function createLlamaTrace\(\): TraceBundle \{[\s\S]*?\}\n\n/, newLlama + "\n\n");
 
-function node(
-  id: string,
-  label: string,
-  type: string,
-  layerIndex: number,
-  order: number,
-  x: number,
-  y: number,
-  z: number,
-  metadata: Record<string, string | number | boolean>,
-): GraphNode {
-  return {
-    id,
-    label,
-    type,
-    layerIndex,
-    order,
-    position: { x, y, z },
-    metadata,
-  };
-}
-
-function edge(id: string, source: string, target: string): GraphEdge {
-  return { id, source, target, type: "flow", weight: 1 };
-}
-
-function camera(
-  id: string,
-  label: string,
-  position: { x: number; y: number; z: number },
-  target: { x: number; y: number; z: number },
-  fov: number,
-): CameraPreset {
-  return { id, label, position, target, fov };
-}
-
-function chapter(id: string, label: string, frameRange: [number, number], defaultSelection: string, description: string): NarrativeChapter {
-  return { id, label, frameRange, defaultSelection, description };
-}
-
-function payloadEntry(id: string, kind: "render" | "inspect"): PayloadCatalogEntry {
-  return { id, kind, mimeType: "application/json", path: `payload/${id}.json` };
-}
-
-function metric(label: string, value: number) {
-  return { label, value: round(value) };
-}
-
-function detail(title: string, blurb: string, stats: Array<{ label: string; value: number }>) {
-  return { title, blurb, stats };
-}
-
-function nodeState(nodeId: string, activation: number, emphasis: number, payloadRef: string) {
-  return { nodeId, activation: round(activation), emphasis: clamp(emphasis, 0, 1), payloadRef };
-}
-
-function createMatrix(sizeX: number, sizeY: number, fn: (x: number, y: number) => number) {
-  return Array.from({ length: sizeY }, (_, row) =>
-    Array.from({ length: sizeX }, (_, column) => round(fn(column / Math.max(sizeX - 1, 1), row / Math.max(sizeY - 1, 1)))),
-  );
-}
-
-function createAttentionHeads(size: number, t: number) {
-  return Array.from({ length: 4 }, (_, headIndex) =>
-    Array.from({ length: size }, (_, row) =>
-      Array.from({ length: size }, (_, column) => {
-        const locality = Math.max(0, 0.72 - Math.abs(row - column) * (0.1 + headIndex * 0.03));
-        const drift = Math.max(0, Math.sin(t * (4.2 + headIndex * 0.4) + row * 0.8 + column * (0.25 + headIndex * 0.1))) * 0.26;
-        const focusBias = row === (headIndex + Math.round(t * 3)) % size ? 0.18 : 0;
-        return round(clamp(0.08 + locality * (0.52 + t * 0.24) + drift + focusBias, 0, 1));
-      }),
-    ),
-  );
-}
-
-function averageMatrices(matrices: number[][][]) {
-  if (matrices.length === 0) return [];
-  const rows = matrices[0]!.length;
-  const columns = matrices[0]![0]!.length;
-
-  return Array.from({ length: rows }, (_, row) =>
-    Array.from({ length: columns }, (_, column) =>
-      round(matrices.reduce((sum, matrix) => sum + (matrix[row]?.[column] ?? 0), 0) / matrices.length),
-    ),
-  );
-}
-
-function emphasisForPhase(phase: TraceFrame["phase"], base: number) {
-  if (phase === "backward") return base * 0.88;
-  if (phase === "update") return base * 0.64;
-  if (phase === "loss") return base * 0.95;
-  if (phase === "decode") return base * 1.05;
-  return base;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function round(value: number) {
-  return Math.round(value * 1000) / 1000;
-}
-
+fs.writeFileSync("packages/official-traces/src/index.ts", content);
