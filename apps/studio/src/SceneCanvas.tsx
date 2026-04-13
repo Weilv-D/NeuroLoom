@@ -12,6 +12,8 @@ type SceneCanvasProps = {
   onSelect(selection: SelectionState): void;
 };
 
+type FocusState = "neutral" | "selected" | "related" | "muted";
+
 export function SceneCanvas({ bundle, frame, selection, onSelect }: SceneCanvasProps) {
   const camera = bundle.manifest.camera_presets.find((entry) => entry.id === frame.camera_anchor) ?? bundle.manifest.camera_presets[0]!;
 
@@ -50,10 +52,40 @@ function SceneRoot({
   const renderPayloadId =
     bundle.manifest.payload_catalog.find((entry) => entry.kind === "render" && frame.payload_refs.includes(entry.id))?.id ?? null;
   const renderPayload = renderPayloadId ? safeParsePayload(bundle.payloads.get(renderPayloadId)) : null;
+  const selectedNodeId = selection?.kind === "node" ? selection.id : null;
+  const selectedEdgeId = selection?.kind === "edge" ? selection.id : null;
+  const relatedNodeIds = new Set<string>();
+  const relatedEdgeIds = new Set<string>();
+
+  if (selectedNodeId) {
+    relatedNodeIds.add(selectedNodeId);
+    bundle.graph.edges.forEach((edge) => {
+      if (edge.source === selectedNodeId || edge.target === selectedNodeId) {
+        relatedEdgeIds.add(edge.id);
+        relatedNodeIds.add(edge.source);
+        relatedNodeIds.add(edge.target);
+      }
+    });
+  }
+
+  if (selectedEdgeId) {
+    const activeEdge = bundle.graph.edges.find((edge) => edge.id === selectedEdgeId);
+    if (activeEdge) {
+      relatedEdgeIds.add(activeEdge.id);
+      relatedNodeIds.add(activeEdge.source);
+      relatedNodeIds.add(activeEdge.target);
+    }
+  }
+
+  const focusPosition = selectedNodeId
+    ? nodeMap.get(selectedNodeId)?.position ?? null
+    : selectedEdgeId
+      ? getEdgeFocusPosition(bundle, selectedEdgeId, nodeMap)
+      : null;
 
   return (
     <>
-      <CameraRig position={camera.position} target={camera.target} />
+      <CameraRig position={camera.position} target={camera.target} focusTarget={focusPosition} />
       <color attach="background" args={["#050710"]} />
       <fog attach="fog" args={["#050710", 13, 30]} />
       <ambientLight intensity={0.7} color="#b8d3ff" />
@@ -61,6 +93,7 @@ function SceneRoot({
       <pointLight position={[-7, 4, 7]} intensity={1.6} color="#15f0ff" />
       <pointLight position={[8, -2, 6]} intensity={1.1} color="#ffb45b" />
       <StageBackdrop family={bundle.manifest.family} />
+      {focusPosition ? <SelectionAura family={bundle.manifest.family} position={vectorToTuple(focusPosition)} /> : null}
       <FamilySignatureLayer bundle={bundle} frame={frame} payload={renderPayload} nodeStateMap={nodeStateMap} />
       {bundle.graph.edges.map((edge) => {
         const source = nodeMap.get(edge.source);
@@ -76,7 +109,7 @@ function SceneRoot({
             from={vectorToTuple(source.position)}
             to={vectorToTuple(target.position)}
             state={state}
-            selected={selection?.id === edge.id}
+            focus={getEdgeFocusState(edge.id, selection, relatedEdgeIds)}
           />
         );
       })}
@@ -88,12 +121,12 @@ function SceneRoot({
           type={node.type}
           position={vectorToTuple(node.position)}
           state={nodeStateMap.get(node.id)}
-          selected={selection?.id === node.id}
+          focus={getNodeFocusState(node.id, selection, relatedNodeIds)}
           onClick={() => onSelect({ id: node.id, kind: "node" })}
         />
       ))}
       {bundle.manifest.family === "transformer" ? (
-        <AttentionRibbonLayer bundle={bundle} payload={renderPayload} />
+        <AttentionRibbonLayer bundle={bundle} payload={renderPayload} selection={selection} />
       ) : null}
       <EffectComposer>
         <Bloom luminanceThreshold={0.08} intensity={1.05} mipmapBlur />
@@ -128,21 +161,48 @@ function FamilySignatureLayer({
 
 function CameraRig({
   position,
-  target
+  target,
+  focusTarget
 }: {
   position: { x: number; y: number; z: number };
   target: { x: number; y: number; z: number };
+  focusTarget: { x: number; y: number; z: number } | null;
 }) {
   const { camera } = useThree();
-  const targetVector = new THREE.Vector3(target.x, target.y, target.z);
+  const baseTarget = new THREE.Vector3(target.x, target.y, target.z);
+  const focusVector = focusTarget ? new THREE.Vector3(focusTarget.x, focusTarget.y, focusTarget.z) : null;
+  const cameraVector = new THREE.Vector3(position.x, position.y, position.z);
 
   useFrame(() => {
-    camera.position.lerp(new THREE.Vector3(position.x, position.y, position.z), 0.08);
-    const lookTarget = new THREE.Vector3().copy(targetVector);
+    camera.position.lerp(cameraVector, 0.08);
+    const lookTarget = focusVector ? new THREE.Vector3().copy(baseTarget).lerp(focusVector, 0.22) : new THREE.Vector3().copy(baseTarget);
     camera.lookAt(lookTarget);
   });
 
   return null;
+}
+
+function SelectionAura({
+  family,
+  position
+}: {
+  family: TraceBundle["manifest"]["family"];
+  position: [number, number, number];
+}) {
+  const ringScale = family === "transformer" ? 1.6 : family === "cnn" ? 1.2 : 1;
+
+  return (
+    <group position={[position[0], position[1], position[2] - 0.48]}>
+      <mesh>
+        <ringGeometry args={[0.72 * ringScale, 1.04 * ringScale, 72]} />
+        <meshBasicMaterial color="#d8ff66" transparent opacity={0.16} />
+      </mesh>
+      <mesh position={[0, 0, -0.06]}>
+        <planeGeometry args={[2.1 * ringScale, 2.1 * ringScale]} />
+        <meshBasicMaterial color="#15f0ff" transparent opacity={0.05} />
+      </mesh>
+    </group>
+  );
 }
 
 function StageBackdrop({ family }: { family: TraceBundle["manifest"]["family"] }) {
@@ -205,16 +265,25 @@ function EdgeFlow({
   from,
   to,
   state,
-  selected
+  focus
 }: {
   family: TraceBundle["manifest"]["family"];
   from: [number, number, number];
   to: [number, number, number];
   state: TraceFrame["edge_states"][number];
-  selected: boolean;
+  focus: FocusState;
 }) {
-  const color = state.direction === "backward" ? "#ffb45b" : "#15f0ff";
-  const width = 1.2 + state.emphasis * 1.3 + (selected ? 0.8 : 0);
+  const baseColor = state.direction === "backward" ? "#ffb45b" : "#15f0ff";
+  const color =
+    focus === "selected"
+      ? blendColor(baseColor, "#d8ff66", 0.58)
+      : focus === "related"
+        ? blendColor(baseColor, "#d8ff66", 0.22)
+        : baseColor;
+  const widthBoost = focus === "selected" ? 1.25 : focus === "related" ? 0.45 : focus === "muted" ? -0.2 : 0;
+  const opacityMultiplier = focus === "muted" ? 0.18 : focus === "related" ? 0.74 : focus === "selected" ? 1 : 1;
+  const width = Math.max(0.8, 1.2 + state.emphasis * 1.3 + widthBoost);
+  const opacity = clamp((0.14 + state.intensity * 0.42) * opacityMultiplier, 0.04, 0.92);
 
   if (family === "transformer" && Math.abs(from[1] - to[1]) > 1.2) {
     const mid = [(from[0] + to[0]) / 2, Math.max(from[1], to[1]) + 1.5, (from[2] + to[2]) / 2] as [number, number, number];
@@ -226,12 +295,12 @@ function EdgeFlow({
         color={color}
         lineWidth={width}
         transparent
-        opacity={0.14 + state.intensity * 0.4}
+        opacity={opacity}
       />
     );
   }
 
-  return <Line points={[from, to]} color={color} lineWidth={width} transparent opacity={0.14 + state.intensity * 0.42} />;
+  return <Line points={[from, to]} color={color} lineWidth={width} transparent opacity={opacity} />;
 }
 
 function NodeGlyph({
@@ -240,7 +309,7 @@ function NodeGlyph({
   type,
   position,
   state,
-  selected,
+  focus,
   onClick
 }: {
   family: TraceBundle["manifest"]["family"];
@@ -248,14 +317,22 @@ function NodeGlyph({
   type: string;
   position: [number, number, number];
   state: TraceFrame["node_states"][number] | undefined;
-  selected: boolean;
+  focus: FocusState;
   onClick(): void;
 }) {
   const activation = state?.activation ?? 0;
   const emphasis = state?.emphasis ?? 0.3;
   const baseColor = activation >= 0 ? "#15f0ff" : "#ffb45b";
-  const highlightColor = selected ? "#d8ff66" : baseColor;
-  const scale = 0.95 + emphasis * 0.55;
+  const highlightColor =
+    focus === "selected"
+      ? "#d8ff66"
+      : focus === "related"
+        ? blendColor(baseColor, "#d8ff66", 0.18)
+        : baseColor;
+  const focusScale = focus === "selected" ? 1.14 : focus === "related" ? 1.04 : focus === "muted" ? 0.9 : 1;
+  const opacity = focus === "muted" ? 0.28 : focus === "related" ? 0.82 : 0.92;
+  const emissiveIntensity = focus === "selected" ? 2.25 + emphasis * 1.7 : focus === "related" ? 1.55 + emphasis * 1.35 : 0.9 + emphasis * 1.1;
+  const scale = (0.95 + emphasis * 0.55) * focusScale;
   const size =
     family === "mlp"
       ? [0.66 * scale, 0.66 * scale, 0.66 * scale]
@@ -271,11 +348,11 @@ function NodeGlyph({
           <meshStandardMaterial
             color="#081520"
             emissive={new THREE.Color(highlightColor)}
-            emissiveIntensity={1.6 + emphasis * 1.4}
+            emissiveIntensity={emissiveIntensity}
             roughness={0.1}
             metalness={0.08}
             transparent
-            opacity={0.92}
+            opacity={opacity}
           />
         </mesh>
       ) : (
@@ -283,28 +360,40 @@ function NodeGlyph({
           <meshStandardMaterial
             color="#07101b"
             emissive={new THREE.Color(highlightColor)}
-            emissiveIntensity={1.2 + emphasis * 1.2}
+            emissiveIntensity={emissiveIntensity}
             roughness={0.16}
             metalness={0.1}
             transparent
-            opacity={0.92}
+            opacity={opacity}
           />
         </RoundedBox>
       )}
-      {selected ? (
+      {focus === "selected" ? (
         <mesh position={[0, 0, -0.2]}>
           <ringGeometry args={[0.45, 0.52, 48]} />
           <meshBasicMaterial color="#d8ff66" transparent opacity={0.66} />
         </mesh>
       ) : null}
-      <Text position={[0, family === "transformer" ? -0.62 : -0.74, 0]} fontSize={0.18} color="#eef2ff">
+      <Text
+        position={[0, family === "transformer" ? -0.62 : -0.74, 0]}
+        fontSize={0.18}
+        color={focus === "muted" ? "#7f8ca8" : focus === "selected" ? "#fcffe1" : "#eef2ff"}
+      >
         {label}
       </Text>
     </group>
   );
 }
 
-function AttentionRibbonLayer({ bundle, payload }: { bundle: TraceBundle; payload: unknown }) {
+function AttentionRibbonLayer({
+  bundle,
+  payload,
+  selection
+}: {
+  bundle: TraceBundle;
+  payload: unknown;
+  selection: SelectionState;
+}) {
   if (!payload || typeof payload !== "object" || !("matrix" in payload)) {
     return null;
   }
@@ -315,6 +404,7 @@ function AttentionRibbonLayer({ bundle, payload }: { bundle: TraceBundle; payloa
   const tokens = bundle.graph.nodes
     .filter((node) => node.type === "token")
     .sort((left, right) => left.order - right.order);
+  const selectedTokenId = selection?.kind === "node" ? selection.id : null;
 
   return (
     <group>
@@ -327,16 +417,18 @@ function AttentionRibbonLayer({ bundle, payload }: { bundle: TraceBundle; payloa
           const start = vectorToTuple(sourceNode.position);
           const end = vectorToTuple(targetNode.position);
           const arcHeight = 1.4 + Math.abs(sourceIndex - targetIndex) * 0.55;
+          const focused = selectedTokenId ? sourceNode.id === selectedTokenId || targetNode.id === selectedTokenId : false;
+          const dimmed = Boolean(selectedTokenId) && !focused;
           return (
             <QuadraticBezierLine
               key={`${sourceNode.id}-${targetNode.id}`}
               start={start}
               end={end}
               mid={[(start[0] + end[0]) / 2, arcHeight, 0]}
-              color="#15f0ff"
-              lineWidth={0.6 + weight * 1.1}
+              color={focused ? "#d8ff66" : "#15f0ff"}
+              lineWidth={0.6 + weight * 1.1 + (focused ? 0.28 : 0)}
               transparent
-              opacity={0.08 + weight * 0.28}
+              opacity={clamp((0.08 + weight * 0.28) * (dimmed ? 0.14 : focused ? 1.2 : 1), 0.03, 0.54)}
             />
           );
         })
@@ -596,4 +688,33 @@ function blendColor(base: string, accent: string, amount: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function getNodeFocusState(nodeId: string, selection: SelectionState, relatedNodeIds: Set<string>): FocusState {
+  if (!selection) return "neutral";
+  if (selection.kind === "node" && selection.id === nodeId) return "selected";
+  return relatedNodeIds.has(nodeId) ? "related" : "muted";
+}
+
+function getEdgeFocusState(edgeId: string, selection: SelectionState, relatedEdgeIds: Set<string>): FocusState {
+  if (!selection) return "neutral";
+  if (selection.kind === "edge" && selection.id === edgeId) return "selected";
+  return relatedEdgeIds.has(edgeId) ? "related" : "muted";
+}
+
+function getEdgeFocusPosition(
+  bundle: TraceBundle,
+  edgeId: string,
+  nodeMap: Map<string, TraceBundle["graph"]["nodes"][number]>
+) {
+  const edge = bundle.graph.edges.find((entry) => entry.id === edgeId);
+  if (!edge) return null;
+  const source = nodeMap.get(edge.source);
+  const target = nodeMap.get(edge.target);
+  if (!source || !target) return null;
+  return {
+    x: (source.position.x + target.position.x) / 2,
+    y: (source.position.y + target.position.y) / 2,
+    z: (source.position.z + target.position.z) / 2
+  };
 }

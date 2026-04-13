@@ -3,12 +3,21 @@ import JSZip from "jszip";
 import { frameSchema, graphSchema, manifestSchema, narrativeSchema, type TraceBundle } from "./schema.js";
 import { validateTraceBundle } from "./validate.js";
 
+const ARCHIVE_DATE = new Date("2024-01-01T00:00:00.000Z");
+
 async function readTextFile(zip: JSZip, path: string): Promise<string> {
   const file = zip.file(path);
   if (!file) {
     throw new Error(`Missing required entry: ${path}`);
   }
   return file.async("text");
+}
+
+function writeArchiveFile(zip: JSZip, path: string, data: string | Uint8Array) {
+  zip.file(path, data, {
+    date: ARCHIVE_DATE,
+    unixPermissions: 0o644
+  });
 }
 
 export async function loadLoomTraceArchive(input: ArrayBuffer | Uint8Array): Promise<TraceBundle> {
@@ -52,19 +61,19 @@ export async function loadLoomTraceArchive(input: ArrayBuffer | Uint8Array): Pro
 
 export async function createLoomTraceArchive(bundle: TraceBundle): Promise<Uint8Array> {
   const zip = new JSZip();
-  zip.file("manifest.json", JSON.stringify(bundle.manifest, null, 2));
-  zip.file("graph.json", JSON.stringify(bundle.graph, null, 2));
-  zip.file("timeline.ndjson", bundle.timeline.map((frame) => JSON.stringify(frame)).join("\n"));
-  zip.file(bundle.manifest.narrative_ref, JSON.stringify(bundle.narrative, null, 2));
+  writeArchiveFile(zip, "manifest.json", JSON.stringify(bundle.manifest, null, 2));
+  writeArchiveFile(zip, "graph.json", JSON.stringify(bundle.graph, null, 2));
+  writeArchiveFile(zip, "timeline.ndjson", bundle.timeline.map((frame) => JSON.stringify(frame)).join("\n"));
+  writeArchiveFile(zip, bundle.manifest.narrative_ref, JSON.stringify(bundle.narrative, null, 2));
   for (const entry of bundle.manifest.payload_catalog) {
     const payload = bundle.payloads.get(entry.id);
     if (!payload) {
       throw new Error(`Missing payload "${entry.id}" while creating archive`);
     }
-    zip.file(entry.path, payload);
+    writeArchiveFile(zip, entry.path, payload);
   }
   if (bundle.preview) {
-    zip.file("preview.webp", bundle.preview);
+    writeArchiveFile(zip, "preview.webp", bundle.preview);
   }
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 9 } });
 }
