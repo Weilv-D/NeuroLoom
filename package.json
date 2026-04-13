@@ -5,10 +5,10 @@
   "type": "module",
   "packageManager": "pnpm@10.26.1",
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm --filter @neuroloom/studio dev",
-    "generate:traces": "pnpm --filter @neuroloom/exporters generate",
-    "test": "pnpm -r test",
-    "validate:samples": "pnpm --filter @neuroloom/core loomtrace ../../apps/studio/public/traces/spiral-2d-mlp.loomtrace ../../apps/studio/public/traces/fashion-mnist-cnn.loomtrace ../../apps/studio/public/traces/tiny-gpt-style-transformer.loomtrace"
+    "build": "pnpm generate:traces && pnpm -r --if-present build",
+    "dev": "pnpm generate:traces && pnpm --filter @neuroloom/studio dev",
+    "generate:traces": "pnpm --filter @neuroloom/core build && pnpm --filter @neuroloom/exporters generate",
+    "test": "pnpm generate:traces && pnpm -r --if-present test",
+    "validate:samples": "pnpm generate:traces && pnpm --filter @neuroloom/core loomtrace ../../apps/studio/public/traces/spiral-2d-mlp.loomtrace ../../apps/studio/public/traces/fashion-mnist-cnn.loomtrace ../../apps/studio/public/traces/tiny-gpt-style-transformer.loomtrace"
   }
 }

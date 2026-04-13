@@ -11,7 +11,7 @@
     }
   },
   "bin": {
-    "loomtrace": "./dist/cli.js"
+    "loomtrace": "./bin/loomtrace.mjs"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
