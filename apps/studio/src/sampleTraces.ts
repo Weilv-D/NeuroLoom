@@ -1,78 +1,45 @@
 export const officialTraces = [
   {
-    id: "spiral-2d-mlp",
+    id: "tiny-mlp-mixer",
     family: "mlp",
-    label: "Spiral MLP",
-    summary: "Forward fan-out, loss anchor, backward pulse, and decision-boundary drift.",
+    label: "Tiny MLP-Mixer",
+    summary: "HuggingFace Google MLP-Mixer SOTA architecture replacing conventional pure MLPs.",
     accent: "electric",
-    path: "/traces/spiral-2d-mlp.loomtrace",
-    storyTitle: "Follow the decision boundary being woven from two raw coordinates.",
+    path: "/traces/tiny-mlp-mixer.loomtrace",
+    storyTitle: "Explore Token Mixing and Channel Mixing without convolutions.",
     watchFor: [
-      "The brightest pulse shifts from the hidden layer into the output head during forward frames.",
-      "The loss frame acts like a hard checkpoint before the backward pulse returns upstream.",
-      "Late update frames calm the stage while confidence rises and the decision plane sharpens.",
+      "Token mixing transverses across sequence tokens.",
+      "Channel mixing processes each token's depth independently."
     ],
-    studioTips: [
-      "Select `hidden-a` to inspect how one neuron tracks the outer spiral arc.",
-      "Scrub around the loss frame to compare forward and backward edge direction changes.",
-      "Use PNG export near the final update frames to capture the cleanest composition.",
-    ],
+    studioTips: ["Select mixing blocks to see parameter independence."]
   },
   {
-    id: "fashion-mnist-cnn",
+    id: "tiny-convnext",
     family: "cnn",
-    label: "Fashion CNN",
-    summary: "Stage-by-stage feature compression with feature-map mosaics and classifier lift.",
+    label: "Tiny ConvNeXt",
+    summary: "HuggingFace Facebook ConvNeXt SOTA vision architecture replacing classic CNNs.",
     accent: "amber",
-    path: "/traces/fashion-mnist-cnn.loomtrace",
-    storyTitle: "Watch spatial detail collapse into category evidence across stacked convolution stages.",
+    path: "/traces/tiny-convnext.loomtrace",
+    storyTitle: "Watch depthwise convolutions modernize visual processing.",
     watchFor: [
-      "Early stages carry wide, soft activation plates that later compress into denser blocks.",
-      "The feature-map mosaic becomes more stable as the classifier head gains confidence.",
-      "Backward frames reveal which stages are still noisy and which already hold stable evidence.",
+      "Large 7x7 depthwise convolution kernels acting on single channels.",
+      "Inverted bottlenecks expanding dimensionality."
     ],
-    studioTips: [
-      "Select `conv-2` to inspect later-stage texture compression and lower entropy.",
-      "Pause on `pool-2` to compare compression metrics against the feature-map matrix.",
-      "Export a frame from the classifier chapter for the clearest stage-to-head composition.",
-    ],
+    studioTips: ["Isolate the bottleneck features in stage-3."]
   },
   {
-    id: "tiny-gpt-style-transformer",
+    id: "tiny-llama",
     family: "transformer",
-    label: "Tiny GPT Transformer",
-    summary: "Token rail, attention ribbons, residual stream, and decode stabilization.",
+    label: "Tiny Llama",
+    summary: "TinyLlama architecture featuring RoPE, GQA, and SwiGLU.",
     accent: "lime",
-    path: "/traces/tiny-gpt-style-transformer.loomtrace",
-    storyTitle: "Track how a short prompt narrows from wide token context into a single next-token decision.",
+    path: "/traces/tiny-llama.loomtrace",
+    storyTitle: "Dive into Grouped-Query Attention and Rotary Positional Embeddings.",
     watchFor: [
-      "Attention ribbons start broad, then tighten toward the most relevant token relationships.",
-      "The residual band keeps information visible between attention and MLP sublayers.",
-      "Decode frames show confidence climbing while entropy drops in the logits head.",
+      "RoPE embeddings avoiding absolute positional addition.",
+      "SwiGLU activation expanding the MLP layer.",
+      "GQA sharing key/value heads for memory efficiency."
     ],
-    studioTips: [
-      "Select `attn` to inspect the attention matrix as it sharpens across decode frames.",
-      "Compare `residual` and `logits` selections to see how focus moves from transport to decision.",
-      "Use chapter jumps to isolate token rail, attention, and decode-head compositions.",
-    ],
-  },
-  {
-    id: "tiny-sota-vit",
-    family: "transformer",
-    label: "Tiny SOTA ViT",
-    summary: "Patch embedding, multihead attention, and linear classifier visualization for Vision." ,
-    accent: "electric",
-    path: "/traces/tiny-sota-vit.loomtrace",
-    storyTitle: "Explore how image patches fuse into semantic meaning.",
-    watchFor: [
-      "Patch embeddings map dense 2D images to semantic tokens.",
-      "Attention layers aggregate these tokens to learn spatial dependencies.",
-      "The classification head makes the final decision on image class."
-    ],
-    studioTips: [
-      "Observe how patch embeddings project the input to higher dimensions.",
-      "Track the flow of backward propagation to the initial layers.",
-      "Inspect the attention weights to see what parts of the image are focused on."
-    ]
-  },
+    studioTips: ["Focus on GQA matrices to count shared attention heads."]
+  }
 ] as const;
