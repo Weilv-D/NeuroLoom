@@ -17,6 +17,7 @@ type StudioState = {
   frameIndex: number;
   playing: boolean;
   selection: SelectionState;
+  frozenSelection: SelectionState;
   activeChapterId: string | null;
   setMode(mode: AppMode): void;
   beginLoading(label: string): void;
@@ -27,6 +28,8 @@ type StudioState = {
   togglePlaying(): void;
   setPlaying(value: boolean): void;
   setSelection(selection: SelectionState): void;
+  toggleFreezeSelection(selection?: SelectionState): void;
+  clearFrozenSelection(): void;
   jumpToChapter(chapterId: string): void;
 };
 
@@ -40,6 +43,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   frameIndex: 0,
   playing: false,
   selection: null,
+  frozenSelection: null,
   activeChapterId: null,
   setMode(mode) {
     set({ mode });
@@ -59,6 +63,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       frameIndex: 0,
       playing: false,
       activeChapterId: firstChapter?.id ?? null,
+      frozenSelection: null,
       selection: firstChapter?.defaultSelection ? { id: firstChapter.defaultSelection, kind: "node" } : null
     });
   },
@@ -89,6 +94,22 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   setSelection(selection) {
     set({ selection });
   },
+  toggleFreezeSelection(selection) {
+    const nextSelection = selection ?? get().selection;
+    const frozenSelection = get().frozenSelection;
+    if (!nextSelection) {
+      set({ frozenSelection: null });
+      return;
+    }
+    if (frozenSelection?.id === nextSelection.id && frozenSelection.kind === nextSelection.kind) {
+      set({ frozenSelection: null });
+      return;
+    }
+    set({ frozenSelection: nextSelection });
+  },
+  clearFrozenSelection() {
+    set({ frozenSelection: null });
+  },
   jumpToChapter(chapterId) {
     const bundle = get().bundle;
     if (!bundle) return;
@@ -97,6 +118,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({
       frameIndex: chapter.frameRange[0],
       activeChapterId: chapter.id,
+      frozenSelection: null,
       selection: chapter.defaultSelection ? { id: chapter.defaultSelection, kind: "node" } : null,
       playing: false
     });

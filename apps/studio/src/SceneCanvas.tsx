@@ -1,6 +1,11 @@
-import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { useMemo, useRef } from "react";
+import { Bloom, EffectComposer, Noise, Vignette, ChromaticAberration } from "@react-three/postprocessing";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Line, QuadraticBezierLine, RoundedBox, Text } from "@react-three/drei";
+import { Line, QuadraticBezierLine, RoundedBox, Text, Stars, Sparkles } from "@react-three/drei";
+import { a, useSpring } from "@react-spring/three";
+
+const AnimatedLine = a(Line);
+const AnimatedBezier = a(QuadraticBezierLine);
 import type { TraceBundle, TraceFrame } from "@neuroloom/core";
 import type { SelectionState } from "./state";
 import * as THREE from "three";
@@ -46,9 +51,9 @@ function SceneRoot({
   selection: SelectionState;
   onSelect(selection: SelectionState): void;
 }) {
-  const nodeMap = new Map(bundle.graph.nodes.map((node) => [node.id, node]));
-  const nodeStateMap = new Map(frame.node_states.map((state) => [state.nodeId, state]));
-  const edgeStateMap = new Map(frame.edge_states.map((state) => [state.edgeId, state]));
+  const nodeMap = useMemo(() => new Map(bundle.graph.nodes.map((node) => [node.id, node])), [bundle.graph.nodes]);
+  const nodeStateMap = useMemo(() => new Map(frame.node_states.map((state) => [state.nodeId, state])), [frame.node_states]);
+  const edgeStateMap = useMemo(() => new Map(frame.edge_states.map((state) => [state.edgeId, state])), [frame.edge_states]);
   const renderPayloadId =
     bundle.manifest.payload_catalog.find((entry) => entry.kind === "render" && frame.payload_refs.includes(entry.id))?.id ?? null;
   const renderPayload = renderPayloadId ? safeParsePayload(bundle.payloads.get(renderPayloadId)) : null;
@@ -87,11 +92,13 @@ function SceneRoot({
     <>
       <CameraRig position={camera.position} target={camera.target} focusTarget={focusPosition} />
       <color attach="background" args={["#050710"]} />
-      <fog attach="fog" args={["#050710", 13, 30]} />
-      <ambientLight intensity={0.7} color="#b8d3ff" />
-      <directionalLight position={[8, 10, 12]} intensity={2.1} color="#d7f6ff" />
-      <pointLight position={[-7, 4, 7]} intensity={1.6} color="#15f0ff" />
-      <pointLight position={[8, -2, 6]} intensity={1.1} color="#ffb45b" />
+      <fog attach="fog" args={["#050710", 10, 35]} />
+      <ambientLight intensity={0.8} color="#acc5f6" />
+      <directionalLight position={[10, 15, 12]} intensity={2.4} color="#d7f6ff" />
+      <pointLight position={[-7, 6, 8]} intensity={2.0} color="#15f0ff" />
+      <pointLight position={[10, -4, 8]} intensity={1.5} color="#ffb45b" />
+      <Stars radius={40} depth={0} count={3000} factor={6} saturation={1} fade speed={1.5} />
+      <Sparkles count={150} scale={25} size={3} speed={0.4} opacity={0.6} color="#15f0ff" />
       <StageBackdrop family={bundle.manifest.family} />
       {focusPosition ? <SelectionAura family={bundle.manifest.family} position={vectorToTuple(focusPosition)} /> : null}
       <FamilySignatureLayer bundle={bundle} frame={frame} payload={renderPayload} nodeStateMap={nodeStateMap} />
@@ -129,9 +136,10 @@ function SceneRoot({
         <AttentionRibbonLayer bundle={bundle} payload={renderPayload} selection={selection} />
       ) : null}
       <EffectComposer>
-        <Bloom luminanceThreshold={0.08} intensity={1.05} mipmapBlur />
-        <Noise opacity={0.04} />
-        <Vignette offset={0.2} darkness={0.65} />
+        <Bloom luminanceThreshold={0.05} intensity={1.8} mipmapBlur />
+        <Noise opacity={0.03} />
+        <ChromaticAberration offset={[0.001, 0.001] as any} opacity={0.5} />
+        <Vignette offset={0.25} darkness={0.7} />
       </EffectComposer>
     </>
   );
@@ -169,14 +177,18 @@ function CameraRig({
   focusTarget: { x: number; y: number; z: number } | null;
 }) {
   const { camera } = useThree();
-  const baseTarget = new THREE.Vector3(target.x, target.y, target.z);
-  const focusVector = focusTarget ? new THREE.Vector3(focusTarget.x, focusTarget.y, focusTarget.z) : null;
-  const cameraVector = new THREE.Vector3(position.x, position.y, position.z);
+  const baseTarget = useMemo(() => new THREE.Vector3(target.x, target.y, target.z), [target]);
+  const focusVector = useMemo(() => focusTarget ? new THREE.Vector3(focusTarget.x, focusTarget.y, focusTarget.z) : null, [focusTarget]);
+  const cameraVector = useMemo(() => new THREE.Vector3(position.x, position.y, position.z), [position]);
+  const lookTargetRef = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
     camera.position.lerp(cameraVector, 0.08);
-    const lookTarget = focusVector ? new THREE.Vector3().copy(baseTarget).lerp(focusVector, 0.22) : new THREE.Vector3().copy(baseTarget);
-    camera.lookAt(lookTarget);
+    lookTargetRef.copy(baseTarget);
+    if (focusVector) {
+      lookTargetRef.lerp(focusVector, 0.22);
+    }
+    camera.lookAt(lookTargetRef.x, lookTargetRef.y, lookTargetRef.z);
   });
 
   return null;
@@ -190,17 +202,27 @@ function SelectionAura({
   position: [number, number, number];
 }) {
   const ringScale = family === "transformer" ? 1.6 : family === "cnn" ? 1.2 : 1;
+  const groupRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (groupRef.current) {
+      groupRef.current.rotation.z = state.clock.elapsedTime * 0.5;
+      groupRef.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 3) * 0.05);
+    }
+  });
 
   return (
     <group position={[position[0], position[1], position[2] - 0.48]}>
-      <mesh>
-        <ringGeometry args={[0.72 * ringScale, 1.04 * ringScale, 72]} />
-        <meshBasicMaterial color="#d8ff66" transparent opacity={0.16} />
-      </mesh>
-      <mesh position={[0, 0, -0.06]}>
-        <planeGeometry args={[2.1 * ringScale, 2.1 * ringScale]} />
-        <meshBasicMaterial color="#15f0ff" transparent opacity={0.05} />
-      </mesh>
+      <group ref={groupRef}>
+        <mesh>
+          <ringGeometry args={[0.72 * ringScale, 1.04 * ringScale, 72]} />
+          <meshBasicMaterial color="#d8ff66" transparent opacity={0.25} />
+        </mesh>
+        <mesh position={[0, 0, -0.06]}>
+          <planeGeometry args={[2.1 * ringScale, 2.1 * ringScale]} />
+          <meshBasicMaterial color="#15f0ff" transparent opacity={0.08} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -274,7 +296,7 @@ function EdgeFlow({
   focus: FocusState;
 }) {
   const baseColor = state.direction === "backward" ? "#ffb45b" : "#15f0ff";
-  const color =
+  const targetColor =
     focus === "selected"
       ? blendColor(baseColor, "#d8ff66", 0.58)
       : focus === "related"
@@ -282,8 +304,15 @@ function EdgeFlow({
         : baseColor;
   const widthBoost = focus === "selected" ? 1.25 : focus === "related" ? 0.45 : focus === "muted" ? -0.2 : 0;
   const opacityMultiplier = focus === "muted" ? 0.18 : focus === "related" ? 0.74 : focus === "selected" ? 1 : 1;
-  const width = Math.max(0.8, 1.2 + state.emphasis * 1.3 + widthBoost);
-  const opacity = clamp((0.14 + state.intensity * 0.42) * opacityMultiplier, 0.04, 0.92);
+  const targetWidth = Math.max(0.8, 1.2 + state.emphasis * 1.3 + widthBoost);
+  const targetOpacity = clamp((0.14 + state.intensity * 0.42) * opacityMultiplier, 0.04, 0.92);
+
+  const { color, width, opacity } = useSpring({
+    color: targetColor,
+    width: targetWidth,
+    opacity: targetOpacity,
+    config: { mass: 1, tension: 120, friction: 14 }
+  });
 
   if (family === "transformer" && Math.abs(from[1] - to[1]) > 1.2) {
     const mid = [(from[0] + to[0]) / 2, Math.max(from[1], to[1]) + 1.5, (from[2] + to[2]) / 2] as [number, number, number];
@@ -292,15 +321,15 @@ function EdgeFlow({
         start={from}
         end={to}
         mid={mid}
-        color={color}
-        lineWidth={width}
+        color={color as any}
+        lineWidth={width as any}
         transparent
-        opacity={opacity}
+        opacity={opacity as any}
       />
     );
   }
 
-  return <Line points={[from, to]} color={color} lineWidth={width} transparent opacity={opacity} />;
+  return <Line points={[from, to]} color={color as any} lineWidth={width as any} transparent opacity={opacity as any} />;
 }
 
 function NodeGlyph({
@@ -323,46 +352,62 @@ function NodeGlyph({
   const activation = state?.activation ?? 0;
   const emphasis = state?.emphasis ?? 0.3;
   const baseColor = activation >= 0 ? "#15f0ff" : "#ffb45b";
-  const highlightColor =
+  const targetHighlightColor =
     focus === "selected"
       ? "#d8ff66"
       : focus === "related"
         ? blendColor(baseColor, "#d8ff66", 0.18)
         : baseColor;
   const focusScale = focus === "selected" ? 1.14 : focus === "related" ? 1.04 : focus === "muted" ? 0.9 : 1;
-  const opacity = focus === "muted" ? 0.28 : focus === "related" ? 0.82 : 0.92;
-  const emissiveIntensity = focus === "selected" ? 2.25 + emphasis * 1.7 : focus === "related" ? 1.55 + emphasis * 1.35 : 0.9 + emphasis * 1.1;
-  const scale = (0.95 + emphasis * 0.55) * focusScale;
-  const size =
+  const targetOpacity = focus === "muted" ? 0.28 : focus === "related" ? 0.82 : 0.92;
+  const targetEmissiveIntensity = focus === "selected" ? 2.25 + emphasis * 1.7 : focus === "related" ? 1.55 + emphasis * 1.35 : 0.9 + emphasis * 1.1;
+  const sizeScale = (0.95 + emphasis * 0.55) * focusScale;
+  const targetScale =
     family === "mlp"
-      ? [0.66 * scale, 0.66 * scale, 0.66 * scale]
+      ? [0.66 * sizeScale, 0.66 * sizeScale, 0.66 * sizeScale] as [number, number, number]
       : family === "cnn"
-        ? [1.05 * scale, 0.42 * scale, 0.28 + emphasis * 0.42]
-        : [1.22 * scale, type === "token" ? 0.36 : 0.48, 0.18 + emphasis * 0.26];
+        ? [1.05 * sizeScale, 0.42 * sizeScale, 0.28 + emphasis * 0.42] as [number, number, number]
+        : [1.22 * sizeScale, type === "token" ? 0.36 : 0.48, 0.18 + emphasis * 0.26] as [number, number, number];
+
+  const { emissive, emissiveIntensity, opacity, groupScale } = useSpring({
+    emissive: targetHighlightColor,
+    emissiveIntensity: targetEmissiveIntensity,
+    opacity: targetOpacity,
+    groupScale: targetScale,
+    config: { mass: 1, tension: 150, friction: 18 }
+  });
 
   return (
-    <group position={position}>
+    <a.group position={position} scale={groupScale}>
       {family === "mlp" ? (
         <mesh onClick={onClick}>
-          <sphereGeometry args={[0.34 * scale, 32, 32]} />
-          <meshStandardMaterial
+          <sphereGeometry args={[0.34, 32, 32]} />
+          <a.meshPhysicalMaterial
             color="#081520"
-            emissive={new THREE.Color(highlightColor)}
+            emissive={emissive as any}
             emissiveIntensity={emissiveIntensity}
-            roughness={0.1}
-            metalness={0.08}
+            roughness={0.08}
+            metalness={0.15}
+            transmission={0.4}
+            thickness={0.5}
+            clearcoat={1.0}
+            clearcoatRoughness={0.1}
             transparent
             opacity={opacity}
           />
         </mesh>
       ) : (
-        <RoundedBox args={size} radius={0.1} smoothness={4} onClick={onClick}>
-          <meshStandardMaterial
+        <RoundedBox args={[1, 1, 1]} radius={0.15} smoothness={6} onClick={onClick}>
+          <a.meshPhysicalMaterial
             color="#07101b"
-            emissive={new THREE.Color(highlightColor)}
+            emissive={emissive as any}
             emissiveIntensity={emissiveIntensity}
-            roughness={0.16}
-            metalness={0.1}
+            roughness={0.12}
+            metalness={0.2}
+            transmission={0.3}
+            thickness={0.4}
+            clearcoat={0.8}
+            clearcoatRoughness={0.1}
             transparent
             opacity={opacity}
           />
@@ -381,7 +426,7 @@ function NodeGlyph({
       >
         {label}
       </Text>
-    </group>
+    </a.group>
   );
 }
 
@@ -520,7 +565,7 @@ function TransformerSignatureLayer({
           >
             <meshStandardMaterial
               color="#08121d"
-              emissive={new THREE.Color("#15f0ff")}
+              emissive={("#15f0ff")}
               emissiveIntensity={0.25 + emphasis * 0.45}
               transparent
               opacity={0.68}
@@ -620,7 +665,7 @@ function SeriesBars3D({
         return (
           <group key={item.label} position={[index * 0.4 - ((items.length - 1) * 0.4) / 2, height / 2, 0]}>
             <RoundedBox args={[0.22, height, 0.22]} radius={0.06} smoothness={4}>
-              <meshStandardMaterial color="#08111b" emissive={new THREE.Color(color)} emissiveIntensity={0.7} transparent opacity={0.88} />
+              <meshStandardMaterial color="#08111b" emissive={(color)} emissiveIntensity={0.7} transparent opacity={0.88} />
             </RoundedBox>
           </group>
         );
@@ -683,7 +728,7 @@ function reverseColumns(matrix: number[][]) {
 }
 
 function blendColor(base: string, accent: string, amount: number) {
-  return new THREE.Color(base).lerp(new THREE.Color(accent), clamp(amount, 0, 1));
+  return new THREE.Color(base).lerp(new THREE.Color(accent), clamp(amount, 0, 1)).getStyle();
 }
 
 function clamp(value: number, min: number, max: number) {

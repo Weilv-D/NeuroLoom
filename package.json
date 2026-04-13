@@ -7,11 +7,23 @@
   "scripts": {
     "build": "pnpm generate:traces && pnpm -r --if-present build",
     "dev": "pnpm generate:traces && pnpm --filter @neuroloom/studio dev",
-    "generate:traces": "pnpm --filter @neuroloom/core build && pnpm --filter @neuroloom/exporters generate",
+    "generate:traces": "pnpm --filter @neuroloom/core build && pnpm --filter @neuroloom/official-traces build && pnpm --filter @neuroloom/exporters generate",
     "test": "pnpm generate:traces && pnpm -r --if-present test",
+    "test:release": "pnpm test && pnpm test:visual",
+    "test:visual": "pnpm build && playwright test",
+    "test:visual:update": "pnpm build && playwright test --update-snapshots",
     "validate:samples": "pnpm generate:traces && pnpm --filter @neuroloom/core loomtrace ../../apps/studio/public/traces/spiral-2d-mlp.loomtrace ../../apps/studio/public/traces/fashion-mnist-cnn.loomtrace ../../apps/studio/public/traces/tiny-gpt-style-transformer.loomtrace"
   },
   "devDependencies": {
-    "@types/node": "^22.19.17"
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.59.1",
+    "@react-spring/three": "^9.7.5",
+    "@types/d3-scale": "^4.0.9",
+    "@types/node": "^22.19.17",
+    "@types/three": "^0.176.0",
+    "eslint": "^10.2.0",
+    "globals": "^17.5.0",
+    "prettier": "^3.8.2",
+    "typescript-eslint": "^8.58.1"
   }
 }

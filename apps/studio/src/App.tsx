@@ -7,6 +7,13 @@ import { officialTraces } from "./sampleTraces";
 import { type SelectionState, useStudioStore } from "./state";
 import { loadTraceFromFile, loadTraceFromUrl } from "./traceLoader";
 
+type BrowserRuntimeState = {
+  label: string;
+  detail: string;
+  webgl: boolean;
+  webgpu: boolean;
+};
+
 export function App() {
   const {
     mode,
@@ -18,6 +25,7 @@ export function App() {
     frameIndex,
     playing,
     selection,
+    frozenSelection,
     activeChapterId,
     setMode,
     beginLoading,
@@ -28,10 +36,13 @@ export function App() {
     togglePlaying,
     setPlaying,
     setSelection,
+    toggleFreezeSelection,
+    clearFrozenSelection,
     jumpToChapter
   } = useStudioStore();
   const uploadId = useId();
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
+  const [browserRuntime, setBrowserRuntime] = useState<BrowserRuntimeState | null>(null);
 
   async function ingestTrace(nextTraceId: string, loader: () => Promise<TraceBundle>) {
     beginLoading(nextTraceId);
@@ -39,6 +50,22 @@ export function App() {
       const nextBundle = await loader();
       startTransition(() => {
         finishLoading(nextTraceId, nextBundle);
+      });
+    } catch (loadError) {
+      failLoading((loadError as Error).message);
+    }
+  }
+
+  async function regenerateOfficialTrace(targetTraceId: string) {
+    beginLoading(`${targetTraceId} (browser)`);
+    try {
+      const { createOfficialTraceBundle, isOfficialTraceId } = await import("@neuroloom/official-traces");
+      if (!isOfficialTraceId(targetTraceId)) {
+        throw new Error(`Browser regeneration is only available for official traces. Received "${targetTraceId}".`);
+      }
+      const nextBundle = createOfficialTraceBundle(targetTraceId);
+      startTransition(() => {
+        finishLoading(targetTraceId, nextBundle);
       });
     } catch (loadError) {
       failLoading((loadError as Error).message);
@@ -67,6 +94,20 @@ export function App() {
   }, [playing, engine]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    void detectBrowserRuntime().then((runtime) => {
+      if (!cancelled) {
+        setBrowserRuntime(runtime);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) {
@@ -91,12 +132,27 @@ export function App() {
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
         void exportStageSnapshot();
+        return;
+      }
+      if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        useStudioStore.getState().toggleFreezeSelection();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        const state = useStudioStore.getState();
+        if (state.frozenSelection) {
+          state.clearFrozenSelection();
+          return;
+        }
+        state.setSelection(null);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [traceId, deferredFrame, failLoading]);
+  }, []);
 
   const frame = engine ? engine.getFrame(frameIndex) : null;
   const deferredFrame = useDeferredValue(frame);
@@ -110,23 +166,34 @@ export function App() {
       ? bundle.manifest.payload_catalog.find((entry) => entry.kind === "render" && deferredFrame.payload_refs.includes(entry.id))?.id ?? null
       : null;
   const renderPayload = bundle && renderPayloadId ? parsePayload(bundle.payloads.get(renderPayloadId)) : null;
+  const sceneSelection = frozenSelection ?? selection;
+  const regenerationTarget = bundle?.manifest.model_id ?? traceId ?? null;
+  const canRegenerateInBrowser = regenerationTarget ? officialTraces.some((trace) => trace.id === regenerationTarget) : false;
+  const frozenSelectionLabel = bundle && frozenSelection ? formatSelectionLabel(bundle, frozenSelection) : null;
 
   async function exportStageSnapshot() {
-    if (!traceId || !deferredFrame) return;
+    const state = useStudioStore.getState();
+    const traceId = state.traceId;
+    const engine = state.engine;
+    const frameIndex = state.frameIndex;
+    if (!traceId || !engine) return;
+    const currentFrame = engine.getFrame(frameIndex);
+    if (!currentFrame) return;
+    
     const canvas = stageFrameRef.current?.querySelector("canvas");
     if (!(canvas instanceof HTMLCanvasElement)) {
-      failLoading("Snapshot export failed: stage canvas is unavailable.");
+      console.warn("Snapshot export failed: stage canvas is unavailable.");
       return;
     }
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) {
-      failLoading("Snapshot export failed: browser could not create a PNG.");
+      console.warn("Snapshot export failed: browser could not create a PNG.");
       return;
     }
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${traceId}-frame-${String(deferredFrame.frame_id).padStart(3, "0")}.png`;
+    anchor.download = `${traceId}-frame-${String(currentFrame.frame_id).padStart(3, "0")}.png`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -184,10 +251,33 @@ export function App() {
               <span className="meta-pill">{bundle.manifest.title}</span>
               <span className="meta-pill">{bundle.manifest.family}</span>
               <span className="meta-pill">{bundle.manifest.frame_count} frames</span>
+              {frozenSelectionLabel ? <span className="meta-pill meta-pill--focus">Focus locked: {frozenSelectionLabel}</span> : null}
             </>
+          ) : null}
+          {browserRuntime ? (
+            <span className="meta-pill meta-pill--runtime" title={browserRuntime.detail}>
+              {browserRuntime.label}
+            </span>
           ) : null}
         </div>
         <div className="toolbar__group">
+          <button type="button" className={frozenSelection ? "chip is-active" : "chip"} onClick={() => toggleFreezeSelection()} disabled={!selection && !frozenSelection}>
+            {frozenSelection ? "Unfreeze Focus" : "Freeze Focus"}
+          </button>
+          <button type="button" className="chip chip--ghost" onClick={() => clearFrozenSelection()} disabled={!frozenSelection}>
+            Clear Focus
+          </button>
+          <button
+            type="button"
+            className="chip"
+            onClick={() => {
+              if (!regenerationTarget || !canRegenerateInBrowser) return;
+              void regenerateOfficialTrace(regenerationTarget);
+            }}
+            disabled={!canRegenerateInBrowser}
+          >
+            Rebuild In Browser
+          </button>
           <button type="button" className="chip" onClick={() => void exportStageSnapshot()} disabled={!bundle}>
             Export PNG
           </button>
@@ -325,6 +415,12 @@ export function App() {
                     <strong>{currentChapter.label}</strong>
                   </div>
                 ) : null}
+                {frozenSelectionLabel ? (
+                  <div>
+                    <span className="overlay-label">Focus</span>
+                    <strong>{frozenSelectionLabel}</strong>
+                  </div>
+                ) : null}
               </div>
               <div className="stage-frame__lens">
                 <RenderLens payload={renderPayload} family={bundle.manifest.family} mode={mode} />
@@ -332,9 +428,9 @@ export function App() {
               <div className="stage-frame__legend">
                 <LegendPill colorClass="is-electric" label="Activation / forward flow" />
                 <LegendPill colorClass="is-amber" label="Compression / backward pressure" />
-                <LegendPill colorClass="is-lime" label="Selection / chapter focus" />
+                <LegendPill colorClass="is-lime" label="Selection / frozen focus" />
               </div>
-              <SceneCanvas bundle={bundle} frame={deferredFrame} selection={selection} onSelect={setSelection} />
+              <SceneCanvas bundle={bundle} frame={deferredFrame} selection={sceneSelection} onSelect={setSelection} />
             </div>
             <TimelineBar
               frame={deferredFrame}
@@ -450,7 +546,7 @@ function TimelineBar({
             Frame {frame.frame_id + 1} / {frameCount}
           </span>
           <span>{chapter ?? "Free scrub"}</span>
-          <span className="timeline__hotkeys">`Space` play · `←/→` step · `S` export</span>
+          <span className="timeline__hotkeys">`Space` play · `←/→` step · `S` export · `F` freeze · `Esc` clear</span>
           <div className="timeline__chapter-nav">
             <button type="button" className="chip chip--ghost" onClick={onPrevChapter}>
               Prev Chapter
@@ -521,7 +617,7 @@ function InspectorPanel({
   const inspectPayload = inspectPayloadId ? parsePayload(bundle.payloads.get(inspectPayloadId)) : null;
   const selectedDetail =
     selection?.kind === "node" && inspectPayload && typeof inspectPayload === "object" && "selectionDetails" in inspectPayload
-      ? inspectPayload.selectionDetails?.[selection.id]
+      ? (inspectPayload.selectionDetails as any)?.[selection.id]
       : null;
 
   return (
@@ -554,7 +650,7 @@ function InspectorPanel({
       <section className="panel-section">
         <header className="panel-section__header">
           <span>Tensor Slice</span>
-          <strong>{inspectPayload?.headline ?? "No payload"}</strong>
+          <strong>{(inspectPayload?.headline as string) ?? "No payload"}</strong>
         </header>
         {inspectPayload ? <PayloadView payload={inspectPayload} /> : <p className="muted-copy">No inspect payload.</p>}
       </section>
@@ -677,6 +773,7 @@ function TransformerAttentionPanel({
               <button
                 key={node.id}
                 type="button"
+                data-testid={`attention-token-${node.id}`}
                 className={selectedTokenIndex === index || selection?.id === node.id ? "focus-chip is-active" : "focus-chip"}
                 onClick={() => {
                   setSelectedTokenIndex(index);
@@ -812,7 +909,7 @@ function CnnFeaturePanel({
         const matrix = "matrix" in stage && Array.isArray(stage.matrix) ? (stage.matrix as number[][]) : [];
         const channels =
           "channels" in stage && Array.isArray(stage.channels)
-            ? stage.channels.flatMap((channel) => {
+            ? stage.channels.flatMap((channel: any) => {
                 if (!channel || typeof channel !== "object") return [];
                 const channelId = "id" in channel && typeof channel.id === "string" ? channel.id : "channel";
                 const channelLabel = "label" in channel && typeof channel.label === "string" ? channel.label : channelId;
@@ -879,7 +976,7 @@ function CnnFeaturePanel({
         <div className="focus-group">
           <span className="focus-group__label">Channels</span>
           <div className="focus-group__chips">
-            {selectedStage.channels.map((channel, index) => (
+            {selectedStage.channels.map((channel: any, index: number) => (
               <button
                 key={channel.id}
                 type="button"
@@ -1172,6 +1269,63 @@ function MatrixHeatmap({ matrix }: { matrix: number[][] }) {
       )}
     </div>
   );
+}
+
+async function detectBrowserRuntime(): Promise<BrowserRuntimeState> {
+  const webgl = canUseWebgl();
+  const navigatorWithGpu = globalThis.navigator as Navigator & {
+    gpu?: {
+      requestAdapter(): Promise<unknown>;
+    };
+  };
+
+  let webgpu = false;
+  if (navigatorWithGpu.gpu) {
+    try {
+      webgpu = Boolean(await navigatorWithGpu.gpu.requestAdapter());
+    } catch {
+      webgpu = false;
+    }
+  }
+
+  if (webgpu) {
+    return {
+      label: "Browser regen • WebGPU ready",
+      detail: "Official traces can be rebuilt locally, and WebGPU is available for future browser-side official runtimes.",
+      webgl,
+      webgpu
+    };
+  }
+
+  if (webgl) {
+    return {
+      label: "Browser regen • WebGL",
+      detail: "Official traces can be rebuilt locally in this browser. Scene rendering stays on the stable WebGL path.",
+      webgl,
+      webgpu
+    };
+  }
+
+  return {
+    label: "Limited browser runtime",
+    detail: "Replay still works, but browser-side regeneration and graphics acceleration are constrained in this environment.",
+    webgl,
+    webgpu
+  };
+}
+
+function canUseWebgl() {
+  if (typeof document === "undefined") return false;
+  const canvas = document.createElement("canvas");
+  return Boolean(canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+}
+
+function formatSelectionLabel(bundle: TraceBundle, selection: SelectionState) {
+  if (!selection) return null;
+  if (selection.kind === "node") {
+    return bundle.graph.nodes.find((node) => node.id === selection.id)?.label ?? selection.id;
+  }
+  return bundle.graph.edges.find((edge) => edge.id === selection.id)?.id ?? selection.id;
 }
 
 function parsePayload(raw: string | undefined) {

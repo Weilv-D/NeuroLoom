@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@neuroloom/core": "workspace:*",
+    "@neuroloom/official-traces": "workspace:*",
     "@react-three/drei": "^10.0.7",
     "@react-three/fiber": "^9.0.0",
     "@react-three/postprocessing": "^3.0.4",

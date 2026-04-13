@@ -59,7 +59,12 @@ export class ReplayEngine {
 
   getPayload(payloadId: string) {
     const raw = this.trace.payloads.get(payloadId);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 }
 
