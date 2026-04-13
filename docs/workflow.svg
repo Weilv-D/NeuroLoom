@@ -46,9 +46,9 @@
   </g>
 
   <!-- Title / Branding -->
-  <text x="50" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="800" fill="#ffffff" letter-spacing="2">NeuroLoom</text>
-  <rect x="180" y="38" width="80" height="15" rx="7.5" fill="url(#glowAccent)" opacity="0.8"/>
-  <text x="220" y="49" font-family="system-ui" font-size="9" font-weight="700" fill="#ffffff" text-anchor="middle" letter-spacing="1">WORKFLOW</text>
+  <text x="50" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="800" fill="#ffffff" letter-spacing="1">NeuroLoom</text>
+  <rect x="220" y="36" width="76" height="18" rx="9" fill="url(#glowAccent)" opacity="0.9"/>
+  <text x="258" y="49" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="1">WORKFLOW</text>
 
   <!-- Connective Paths -->
   <!-- Main flow paths with glowing animation dots -->
@@ -65,8 +65,12 @@
       <rect width="220" height="200" rx="20" fill="url(#glass)" stroke="rgba(255,255,255,0.1)" stroke-width="1" filter="url(#glassShadow)"/>
       <rect width="220" height="4" fill="url(#glowAccent)" opacity="0.6" style="mix-blend-mode: overlay;" />
       
-      <circle cx="110" cy="80" r="40" fill="rgba(59,130,246,0.1)" stroke="rgba(59,130,246,0.5)" stroke-width="2" />
-      <path d="M95 70 L125 70 L110 95 Z" fill="rgba(59,130,246,0.8)" />
+      <!-- Better Model Icon -->
+      <circle cx="110" cy="80" r="40" fill="none" stroke="rgba(59,130,246,0.3)" stroke-width="2" />
+      <path d="M96 68 L126 68 L111 94 Z" fill="none" stroke="url(#glowAccent)" stroke-width="2.5" stroke-linejoin="round" />
+      <circle cx="111" cy="94" r="3" fill="#ec4899" filter="url(#neonGlow)"/>
+      <circle cx="96" cy="68" r="3" fill="#3b82f6" filter="url(#neonGlow)"/>
+      <circle cx="126" cy="68" r="3" fill="#8b5cf6" filter="url(#neonGlow)"/>
       
       <text x="110" y="150" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">Model Training</text>
       <text x="110" y="170" text-anchor="middle" font-size="12" fill="#94a3b8">PyTorch / Export ONNX</text>
@@ -98,11 +102,24 @@
     <g transform="translate(700, 100)">
       <rect width="240" height="200" rx="20" fill="url(#glass)" stroke="url(#glowAccent)" stroke-width="1" filter="url(#glassShadow)"/>
       
-      <!-- 3D Layer Representation -->
-      <g transform="translate(120, 80) scale(1.2)">
-        <polygon points="0,-25 40,-10 0,15 -40,-10" fill="rgba(139, 92, 246, 0.2)" stroke="#8b5cf6" stroke-width="1.5" />
-        <polygon points="0,-15 35,-2 0,20 -35,-2" fill="rgba(59, 130, 246, 0.2)" stroke="#3b82f6" stroke-width="1.5" transform="translate(0, 15)" />
-        <polygon points="0,-5 30,5 0,25 -30,5" fill="rgba(236, 72, 153, 0.2)" stroke="#ec4899" stroke-width="1.5" filter="url(#neonGlow)" transform="translate(0, 30)" />
+      <!-- Minimal Perspective Grid / Camera representation -->
+      <g transform="translate(120, 80) scale(1.1)">
+        <!-- Beautiful floating nodes / perspective elements instead of stacked diamonds -->
+        <!-- Center glowing core -->
+        <circle cx="0" cy="0" r="16" fill="url(#glowAccent)" filter="url(#neonGlow)"/>
+        <circle cx="0" cy="0" r="10" fill="#ffffff" opacity="0.9"/>
+        
+        <!-- Orbital ring -->
+        <ellipse cx="0" cy="0" rx="45" ry="15" fill="none" stroke="#8b5cf6" stroke-width="1.5" transform="rotate(-15)"/>
+        <ellipse cx="0" cy="0" rx="45" ry="15" fill="none" stroke="#3b82f6" stroke-width="1.5" transform="rotate(45)"/>
+        
+        <!-- Floating nodes along orbits -->
+        <circle cx="43" cy="-12" r="4" fill="#3b82f6" filter="url(#neonGlow)"/>
+        <circle cx="-32" cy="32" r="5" fill="#8b5cf6" filter="url(#neonGlow)"/>
+        <circle cx="15" cy="-28" r="3" fill="#ec4899" filter="url(#neonGlow)"/>
+        
+        <!-- Outer hexagon representing a 3D isometric bounding box -->
+        <polygon points="0,-40 34,-20 34,20 0,40 -34,20 -34,-20" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
       </g>
       
       <text x="120" y="150" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">2.5D Cinematic Studio</text>
