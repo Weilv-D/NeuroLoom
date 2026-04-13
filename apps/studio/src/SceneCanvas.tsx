@@ -61,6 +61,7 @@ function SceneRoot({
       <pointLight position={[-7, 4, 7]} intensity={1.6} color="#15f0ff" />
       <pointLight position={[8, -2, 6]} intensity={1.1} color="#ffb45b" />
       <StageBackdrop family={bundle.manifest.family} />
+      <FamilySignatureLayer bundle={bundle} frame={frame} payload={renderPayload} nodeStateMap={nodeStateMap} />
       {bundle.graph.edges.map((edge) => {
         const source = nodeMap.get(edge.source);
         const target = nodeMap.get(edge.target);
@@ -101,6 +102,28 @@ function SceneRoot({
       </EffectComposer>
     </>
   );
+}
+
+function FamilySignatureLayer({
+  bundle,
+  frame,
+  payload,
+  nodeStateMap
+}: {
+  bundle: TraceBundle;
+  frame: TraceFrame;
+  payload: unknown;
+  nodeStateMap: Map<string, TraceFrame["node_states"][number]>;
+}) {
+  if (bundle.manifest.family === "mlp") {
+    return <MlpSignatureLayer frame={frame} payload={payload} />;
+  }
+
+  if (bundle.manifest.family === "cnn") {
+    return <CnnSignatureLayer payload={payload} />;
+  }
+
+  return <TransformerSignatureLayer bundle={bundle} payload={payload} nodeStateMap={nodeStateMap} />;
 }
 
 function CameraRig({
@@ -322,6 +345,198 @@ function AttentionRibbonLayer({ bundle, payload }: { bundle: TraceBundle; payloa
   );
 }
 
+function MlpSignatureLayer({ frame, payload }: { frame: TraceFrame; payload: unknown }) {
+  const matrix = readMatrix(payload);
+  const series = readSeries(payload);
+  const focusStrength = clamp(
+    0.35 + (frame.metric_refs.find((metric) => metric.id === "confidence")?.value ?? 0.4) * 0.6,
+    0.25,
+    1
+  );
+
+  return (
+    <group>
+      <group position={[1.3, -3.15, 0.45]} rotation={[-1.18, 0.08, 0]}>
+        <MatrixPlane matrix={sliceMatrix(matrix, 8, 8)} cellSize={0.24} depth={0.04} />
+      </group>
+      <SeriesBars3D position={[1.15, -4.05, 1.2]} series={series} color="#15f0ff" />
+      <mesh position={[4.82, 0, -0.3]} rotation={[0, 0, Math.PI / 2]}>
+        <ringGeometry args={[0.56, 0.72 + focusStrength * 0.1, 56]} />
+        <meshBasicMaterial color="#15f0ff" transparent opacity={0.16 + focusStrength * 0.2} />
+      </mesh>
+      <mesh position={[4.82, 0, -0.42]} rotation={[0, 0, Math.PI / 2]}>
+        <ringGeometry args={[0.84, 0.9 + focusStrength * 0.08, 56]} />
+        <meshBasicMaterial color="#d8ff66" transparent opacity={0.08 + focusStrength * 0.12} />
+      </mesh>
+    </group>
+  );
+}
+
+function CnnSignatureLayer({ payload }: { payload: unknown }) {
+  const matrix = readMatrix(payload);
+  const series = readSeries(payload);
+
+  return (
+    <group>
+      <FeatureMapStack position={[-1.8, 2.65, 0.25]} matrix={sliceMatrix(matrix, 6, 6)} tint="#15f0ff" />
+      <FeatureMapStack position={[3.08, 2.55, 0.18]} matrix={sliceMatrix(reverseColumns(matrix), 6, 6)} tint="#d8ff66" />
+      <SeriesBars3D position={[8.5, -1.8, 0.7]} series={series} color="#ffb45b" />
+      <RoundedBox args={[1.24, 2.42, 0.16]} radius={0.12} smoothness={4} position={[8.36, 0.18, -0.44]}>
+        <meshBasicMaterial color="#172136" transparent opacity={0.24} />
+      </RoundedBox>
+    </group>
+  );
+}
+
+function TransformerSignatureLayer({
+  bundle,
+  payload,
+  nodeStateMap
+}: {
+  bundle: TraceBundle;
+  payload: unknown;
+  nodeStateMap: Map<string, TraceFrame["node_states"][number]>;
+}) {
+  const series = readSeries(payload);
+  const tokens = bundle.graph.nodes
+    .filter((node) => node.type === "token")
+    .sort((left, right) => left.order - right.order);
+
+  return (
+    <group>
+      <mesh position={[1.65, -1.42, -0.5]}>
+        <planeGeometry args={[6.8, 0.24]} />
+        <meshBasicMaterial color="#15f0ff" transparent opacity={0.1} />
+      </mesh>
+      <mesh position={[3.18, -1.42, -0.38]}>
+        <planeGeometry args={[6.2, 0.14]} />
+        <meshBasicMaterial color="#d8ff66" transparent opacity={0.08} />
+      </mesh>
+      <RoundedBox args={[3.2, 0.22, 0.1]} radius={0.08} smoothness={4} position={[1.8, -1.38, -0.1]}>
+        <meshStandardMaterial color="#09111b" emissive="#15f0ff" emissiveIntensity={0.5} transparent opacity={0.72} />
+      </RoundedBox>
+      {tokens.map((token) => {
+        const state = nodeStateMap.get(token.id);
+        const emphasis = state?.emphasis ?? 0.5;
+        return (
+          <RoundedBox
+            key={`token-plate-${token.id}`}
+            args={[1.16, 0.18, 0.06]}
+            radius={0.06}
+            smoothness={4}
+            position={[token.position.x, token.position.y - 0.42, -0.05]}
+          >
+            <meshStandardMaterial
+              color="#08121d"
+              emissive={new THREE.Color("#15f0ff")}
+              emissiveIntensity={0.25 + emphasis * 0.45}
+              transparent
+              opacity={0.68}
+            />
+          </RoundedBox>
+        );
+      })}
+      <SeriesBars3D position={[9.3, -1.7, 0.55]} series={series} color="#15f0ff" />
+      <RoundedBox args={[1.4, 2.7, 0.14]} radius={0.12} smoothness={4} position={[9.24, -0.1, -0.45]}>
+        <meshBasicMaterial color="#162033" transparent opacity={0.24} />
+      </RoundedBox>
+    </group>
+  );
+}
+
+function MatrixPlane({
+  matrix,
+  cellSize,
+  depth
+}: {
+  matrix: number[][];
+  cellSize: number;
+  depth: number;
+}) {
+  const rows = matrix.length;
+  const columns = matrix[0]?.length ?? 0;
+  const xOffset = ((columns - 1) * cellSize) / 2;
+  const yOffset = ((rows - 1) * cellSize) / 2;
+
+  return (
+    <group>
+      {matrix.flatMap((row, rowIndex) =>
+        row.map((value, columnIndex) => {
+          const positionX = columnIndex * cellSize - xOffset;
+          const positionY = yOffset - rowIndex * cellSize;
+          const magnitude = clamp(Math.abs(value), 0, 1);
+          return (
+            <mesh key={`${rowIndex}-${columnIndex}`} position={[positionX, positionY, magnitude * depth]}>
+              <planeGeometry args={[cellSize * 0.82, cellSize * 0.82]} />
+              <meshBasicMaterial
+                color={blendColor("#121b2b", value >= 0 ? "#15f0ff" : "#ffb45b", 0.16 + magnitude * 0.84)}
+                transparent
+                opacity={0.24 + magnitude * 0.58}
+              />
+            </mesh>
+          );
+        })
+      )}
+    </group>
+  );
+}
+
+function FeatureMapStack({
+  position,
+  matrix,
+  tint
+}: {
+  position: [number, number, number];
+  matrix: number[][];
+  tint: string;
+}) {
+  const layers = [0, 1, 2];
+  return (
+    <group position={position}>
+      {layers.map((layer) => (
+        <group key={layer} position={[layer * 0.16, -layer * 0.12, -layer * 0.15]}>
+          <RoundedBox args={[1.6, 1.6, 0.04]} radius={0.08} smoothness={4}>
+            <meshBasicMaterial color="#0d1422" transparent opacity={0.72 - layer * 0.12} />
+          </RoundedBox>
+          <group position={[0, 0, 0.05]}>
+            <MatrixPlane matrix={matrix} cellSize={0.19} depth={0.02} />
+          </group>
+        </group>
+      ))}
+      <mesh position={[0, 0, -0.36]}>
+        <planeGeometry args={[1.9, 1.9]} />
+        <meshBasicMaterial color={tint} transparent opacity={0.08} />
+      </mesh>
+    </group>
+  );
+}
+
+function SeriesBars3D({
+  position,
+  series,
+  color
+}: {
+  position: [number, number, number];
+  series: Array<{ label: string; value: number }>;
+  color: string;
+}) {
+  const items = series.slice(0, 3);
+  return (
+    <group position={position}>
+      {items.map((item, index) => {
+        const height = 0.25 + clamp(Math.abs(item.value), 0, 1.6) * 1.25;
+        return (
+          <group key={item.label} position={[index * 0.4 - ((items.length - 1) * 0.4) / 2, height / 2, 0]}>
+            <RoundedBox args={[0.22, height, 0.22]} radius={0.06} smoothness={4}>
+              <meshStandardMaterial color="#08111b" emissive={new THREE.Color(color)} emissiveIntensity={0.7} transparent opacity={0.88} />
+            </RoundedBox>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 function safeParsePayload(raw: string | undefined) {
   if (!raw) return null;
   try {
@@ -333,4 +548,52 @@ function safeParsePayload(raw: string | undefined) {
 
 function vectorToTuple(vector: { x: number; y: number; z: number }): [number, number, number] {
   return [vector.x, vector.y, vector.z];
+}
+
+function readMatrix(payload: unknown): number[][] {
+  if (!payload || typeof payload !== "object" || !("matrix" in payload) || !Array.isArray(payload.matrix)) {
+    return [
+      [0.2, 0.35, 0.5, 0.12],
+      [0.1, -0.12, 0.28, 0.42],
+      [-0.34, 0.22, 0.45, 0.18],
+      [0.15, 0.3, -0.18, 0.4]
+    ];
+  }
+
+  return payload.matrix
+    .filter((row): row is unknown[] => Array.isArray(row))
+    .map((row) => row.map((value) => (typeof value === "number" ? value : 0)));
+}
+
+function readSeries(payload: unknown): Array<{ label: string; value: number }> {
+  if (!payload || typeof payload !== "object" || !("series" in payload) || !Array.isArray(payload.series)) {
+    return [
+      { label: "signal", value: 0.42 },
+      { label: "focus", value: 0.64 },
+      { label: "drift", value: 0.28 }
+    ];
+  }
+
+  return payload.series.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const label = "label" in entry && typeof entry.label === "string" ? entry.label : "metric";
+    const value = "value" in entry && typeof entry.value === "number" ? entry.value : 0;
+    return [{ label, value }];
+  });
+}
+
+function sliceMatrix(matrix: number[][], maxRows: number, maxColumns: number) {
+  return matrix.slice(0, maxRows).map((row) => row.slice(0, maxColumns));
+}
+
+function reverseColumns(matrix: number[][]) {
+  return matrix.map((row) => [...row].reverse());
+}
+
+function blendColor(base: string, accent: string, amount: number) {
+  return new THREE.Color(base).lerp(new THREE.Color(accent), clamp(amount, 0, 1));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
