@@ -9,7 +9,16 @@ import {
 import { startTransition, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { SceneCanvas } from "./SceneCanvas";
-import { checkRunnerHealth, connectToSession, downloadTraceFromRunner, startChatSession, type RunnerHealth } from "./runnerClient";
+import {
+  cancelRunnerSession,
+  checkRunnerHealth,
+  connectToSession,
+  downloadTraceFromRunner,
+  listRunnerSessions,
+  startChatSession,
+  type RunnerHealth,
+  type RunnerSession,
+} from "./runnerClient";
 import { qwenSampleTrace } from "./sampleTraces";
 import { loadTraceFromFile, loadTraceFromUrl } from "./traceLoader";
 import type { SelectionState } from "./types";
@@ -33,6 +42,7 @@ export function App() {
   const [liveFollow, setLiveFollow] = useState(true);
   const [runnerHealth, setRunnerHealth] = useState<RunnerHealth | null>(null);
   const [runnerChecked, setRunnerChecked] = useState(false);
+  const [runnerSessions, setRunnerSessions] = useState<RunnerSession[]>([]);
   const [sessionMode, setSessionMode] = useState<SessionMode>("sample");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [traceUrl, setTraceUrl] = useState<string | null>(null);
@@ -58,6 +68,19 @@ export function App() {
       }
     }
 
+    async function refreshRunnerSessions() {
+      try {
+        const sessions = await listRunnerSessions();
+        if (!cancelled) {
+          setRunnerSessions(sessions);
+        }
+      } catch {
+        if (!cancelled) {
+          setRunnerSessions([]);
+        }
+      }
+    }
+
     async function boot() {
       setLoadingLabel("Loading the official Qwen replay…");
       try {
@@ -78,11 +101,13 @@ export function App() {
         }
       }
       await refreshRunnerHealth();
+      await refreshRunnerSessions();
     }
 
     void boot();
     const healthInterval = window.setInterval(() => {
       void refreshRunnerHealth();
+      void refreshRunnerSessions();
     }, 10_000);
 
     return () => {
@@ -147,6 +172,7 @@ export function App() {
   const focusDigest = currentPayload ? currentPayload.blockDigest.slice(Math.max(0, focusBlock - 2), Math.min(24, focusBlock + 3)) : [];
   const selectionDetail = describeSelection({ bundle, frame, payload: currentPayload, selection });
   const chapterIndex = currentChapter && bundle ? bundle.narrative.chapters.findIndex((chapter) => chapter.id === currentChapter.id) : -1;
+  const currentRunnerSession = sessionId ? runnerSessions.find((entry) => entry.id === sessionId) ?? null : null;
 
   function stepFrame(delta: number) {
     if (!bundle || bundle.timeline.length === 0) return;
@@ -228,6 +254,7 @@ export function App() {
           setSessionMode("replay");
           setLoadingLabel(null);
           setStatusLine(`Live session completed in ${(event.durationMs / 1000).toFixed(1)}s. Replay is ready.`);
+          void listRunnerSessions().then(setRunnerSessions).catch(() => undefined);
         },
         onError(message) {
           setLoadingLabel(null);
@@ -258,6 +285,17 @@ export function App() {
         setFrameIndex(event.frame.frame_id);
       }
     });
+  }
+
+  async function stopLiveSession() {
+    if (!sessionId) return;
+    try {
+      setStatusLine("Stopping the live session…");
+      await cancelRunnerSession(sessionId);
+      setRunnerSessions(await listRunnerSessions());
+    } catch (stopError) {
+      setError((stopError as Error).message);
+    }
   }
 
   async function importTrace(file: File) {
@@ -311,6 +349,30 @@ export function App() {
       triggerDownload(URL.createObjectURL(new Blob([archive], { type: "application/octet-stream" })), `${bundle.manifest.model_id}.loomtrace`);
     } catch (exportError) {
       setError((exportError as Error).message);
+    }
+  }
+
+  async function openRunnerReplay(session: RunnerSession) {
+    try {
+      setLoadingLabel(`Loading replay ${session.id}…`);
+      const archive = await downloadTraceFromRunner(session.traceUrl);
+      const file = new File([archive], `${session.id}.loomtrace`, { type: "application/octet-stream" });
+      const nextBundle = await loadTraceFromFile(file);
+      startTransition(() => {
+        setBundle(nextBundle);
+        setFrameIndex(0);
+        setSelection(null);
+        setSessionMode("replay");
+        setSessionId(session.id);
+        setTraceUrl(session.traceUrl);
+        setActivePrompt(session.prompt);
+        setAssistantText(session.completion);
+        setStatusLine(`Loaded replay ${session.id}.`);
+      });
+    } catch (openError) {
+      setError((openError as Error).message);
+    } finally {
+      setLoadingLabel(null);
     }
   }
 
@@ -378,9 +440,22 @@ export function App() {
                     const health = await checkRunnerHealth();
                     setRunnerHealth(health);
                     setRunnerChecked(true);
+                    try {
+                      setRunnerSessions(await listRunnerSessions());
+                    } catch {
+                      setRunnerSessions([]);
+                    }
                   }}
                 >
                   Refresh Runner
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void stopLiveSession()}
+                  disabled={!sessionId || sessionMode !== "live"}
+                >
+                  Stop Live
                 </button>
               </div>
             </form>
@@ -408,6 +483,10 @@ export function App() {
               <div>
                 <span>Status</span>
                 <strong>{statusLine}</strong>
+              </div>
+              <div>
+                <span>Session</span>
+                <strong>{currentRunnerSession?.status ?? sessionMode}</strong>
               </div>
             </div>
             {error ? <p className="error-text">{error}</p> : null}
@@ -448,6 +527,38 @@ export function App() {
                   </button>
                 );
               })}
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-heading">
+              <p className="eyebrow">Recent Sessions</p>
+              <span>{runnerSessions.length}</span>
+            </div>
+            <div className="session-list">
+              {runnerSessions.length === 0 ? <span className="empty-state">No runner sessions yet.</span> : null}
+              {runnerSessions.map((session) => (
+                <article key={session.id} className={session.id === sessionId ? "session-row session-row--active" : "session-row"}>
+                  <div className="session-row__meta">
+                    <strong>{session.id}</strong>
+                    <span>{session.status}</span>
+                  </div>
+                  <p>{session.prompt}</p>
+                  <div className="session-row__actions">
+                    <span>{session.tokenCount} tokens</span>
+                    {session.archiveReady ? (
+                      <button type="button" className="secondary-button" onClick={() => void openRunnerReplay(session)}>
+                        Open Replay
+                      </button>
+                    ) : null}
+                    {(session.status === "live" || session.status === "booting") && session.id === sessionId ? (
+                      <button type="button" className="secondary-button" onClick={() => void stopLiveSession()}>
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         </aside>

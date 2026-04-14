@@ -27,9 +27,13 @@ type SessionRecord = {
   events: QwenLiveEvent[];
   sockets: Set<WebSocket>;
   archive: Uint8Array | null;
-  status: "booting" | "live" | "complete" | "error";
+  status: "booting" | "live" | "complete" | "error" | "cancelled";
   error: string | null;
   completion: string;
+  createdAt: number;
+  updatedAt: number;
+  abortController: AbortController;
+  finishReason: "completed" | "cancelled" | "error";
 };
 
 const runnerPort = Number(process.env.NEUROLOOM_RUNNER_PORT ?? "7778");
@@ -38,6 +42,7 @@ const backendApiKey = process.env.NEUROLOOM_BACKEND_API_KEY?.trim() ?? process.e
 const backendModel = process.env.NEUROLOOM_BACKEND_MODEL?.trim() ?? qwenRunnerModelId;
 const backendStreamingRequested = process.env.NEUROLOOM_BACKEND_STREAM?.trim() !== "false";
 const mode: RunnerMode = backendUrl ? "adapter" : "synthetic";
+const sessionRetention = Number(process.env.NEUROLOOM_SESSION_RETENTION ?? "12");
 
 const sessions = new Map<string, SessionRecord>();
 
@@ -137,8 +142,13 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       status: "booting",
       error: null,
       completion: "",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      abortController: new AbortController(),
+      finishReason: "completed",
     };
     sessions.set(sessionId, session);
+    trimSessions();
 
     const startEvent = recorder.createStartEvent();
     session.events.push(startEvent);
@@ -163,6 +173,15 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
         websocket_url: `ws://127.0.0.1:${runnerPort}/live/${sessionId}`,
         trace_url: `http://127.0.0.1:${runnerPort}/sessions/${sessionId}/trace`,
       },
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/sessions") {
+    sendJson(response, 200, {
+      sessions: [...sessions.values()]
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .map((session) => serializeSession(session)),
     });
     return;
   }
@@ -194,15 +213,25 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       sendJson(response, 404, { error: "Unknown session id." });
       return;
     }
-    sendJson(response, 200, {
-      id: session.id,
-      prompt: session.prompt,
-      status: session.status,
-      error: session.error,
-      events: session.events.length,
-      completion: session.completion,
-      archiveReady: Boolean(session.archive),
-    });
+    sendJson(response, 200, serializeSession(session));
+    return;
+  }
+
+  const cancelMatch = url.pathname.match(/^\/sessions\/([^/]+)\/cancel$/);
+  if (request.method === "POST" && cancelMatch) {
+    const session = sessions.get(cancelMatch[1]);
+    if (!session) {
+      sendJson(response, 404, { error: "Unknown session id." });
+      return;
+    }
+    if (session.status !== "live" && session.status !== "booting") {
+      sendJson(response, 409, { error: `Session is already ${session.status}.` });
+      return;
+    }
+    session.finishReason = "cancelled";
+    session.abortController.abort("Session cancelled by user");
+    session.updatedAt = Date.now();
+    sendJson(response, 202, serializeSession(session));
     return;
   }
 
@@ -231,9 +260,16 @@ async function runSession(session: SessionRecord, request: ChatCompletionRequest
     const completionText = await resolveBufferedCompletionText(session.prompt, request);
     await emitCompletionAsTokens(session, completionText, false);
   } catch (error) {
-    session.status = "error";
-    session.error = (error as Error).message;
+    const reason = session.abortController.signal.aborted ? "cancelled" : "error";
+    session.status = reason;
+    session.finishReason = reason;
+    session.error = reason === "cancelled" ? null : (error as Error).message;
+    session.updatedAt = Date.now();
     const fallbackText = buildSyntheticQwenResponse(session.prompt);
+    if (reason === "cancelled") {
+      await finishSession(session);
+      return;
+    }
     await emitCompletionAsTokens(session, fallbackText, true);
   }
 }
@@ -242,21 +278,32 @@ async function emitCompletionAsTokens(session: SessionRecord, completionText: st
   session.completion = completionText;
   const tokens = tokenizeCompletion(completionText);
   for (const token of tokens) {
+    if (session.abortController.signal.aborted) {
+      break;
+    }
     if (syntheticDelay) {
       await sleep(stepDelay(token));
     }
+    if (session.abortController.signal.aborted) {
+      break;
+    }
     const event = session.recorder.pushToken(token);
     session.events.push(event);
+    session.updatedAt = Date.now();
     broadcastEvent(session, event);
   }
   await finishSession(session);
 }
 
 async function finishSession(session: SessionRecord) {
+  if (session.archive) {
+    return;
+  }
   const completed = session.recorder.complete();
   session.events.push(completed);
   session.archive = await createLoomTraceArchive(session.recorder.exportBundle());
-  session.status = "complete";
+  session.status = session.finishReason === "cancelled" ? "cancelled" : session.finishReason === "error" ? "error" : "complete";
+  session.updatedAt = Date.now();
   broadcastEvent(session, completed);
 }
 
@@ -294,6 +341,10 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
   let isDone = false;
 
   while (!isDone) {
+    if (session.abortController.signal.aborted) {
+      await reader.cancel();
+      break;
+    }
     const { done, value } = await reader.read();
     if (done) {
       break;
@@ -312,6 +363,7 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
       if (!parsed.content) continue;
       completion += parsed.content;
       session.completion = completion;
+      session.updatedAt = Date.now();
       emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
     }
   }
@@ -321,6 +373,7 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
     if (parsed?.content) {
       completion += parsed.content;
       session.completion = completion;
+      session.updatedAt = Date.now();
       emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
     }
   }
@@ -440,13 +493,17 @@ function emitFreshTokens(session: SessionRecord, completion: string, emittedToke
   const nextTokens = tokenizeCompletion(completion);
   const readyCount = flushLast ? nextTokens.length : completedTokenCount(completion, nextTokens.length);
   for (let index = emittedTokenCount; index < readyCount; index++) {
+    if (session.abortController.signal.aborted) {
+      break;
+    }
     const token = nextTokens[index];
     if (!token) continue;
     const event = session.recorder.pushToken(token);
     session.events.push(event);
+    session.updatedAt = Date.now();
     broadcastEvent(session, event);
   }
-  return readyCount;
+  return session.abortController.signal.aborted ? emittedTokenCount : readyCount;
 }
 
 function completedTokenCount(completion: string, tokenCount: number) {
@@ -483,4 +540,36 @@ function stepDelay(token: string) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function serializeSession(session: SessionRecord) {
+  return {
+    id: session.id,
+    prompt: session.prompt,
+    status: session.status,
+    finishReason: session.finishReason,
+    error: session.error,
+    events: session.events.length,
+    completion: session.completion,
+    archiveReady: Boolean(session.archive),
+    tokenCount: session.events.filter((event) => event.type === "token_step").length,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    traceUrl: `http://127.0.0.1:${runnerPort}/sessions/${session.id}/trace`,
+  };
+}
+
+function trimSessions() {
+  if (sessions.size <= sessionRetention) {
+    return;
+  }
+  const removable = [...sessions.values()]
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .slice(0, sessions.size - sessionRetention);
+  for (const session of removable) {
+    if (session.status === "live" || session.status === "booting") {
+      continue;
+    }
+    sessions.delete(session.id);
+  }
 }

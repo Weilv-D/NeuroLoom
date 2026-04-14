@@ -14,6 +14,21 @@ export type RunnerHealth = {
   liveEndpoint: string;
 };
 
+export type RunnerSession = {
+  id: string;
+  prompt: string;
+  status: "booting" | "live" | "complete" | "error" | "cancelled";
+  finishReason: "completed" | "cancelled" | "error";
+  error: string | null;
+  events: number;
+  completion: string;
+  archiveReady: boolean;
+  tokenCount: number;
+  createdAt: number;
+  updatedAt: number;
+  traceUrl: string;
+};
+
 export type SessionStartResponse = {
   id: string;
   neuroloom: {
@@ -88,4 +103,24 @@ export async function downloadTraceFromRunner(traceUrl: string): Promise<Uint8Ar
     throw new Error(`Failed to download session trace: ${response.status} ${response.statusText}`);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+export async function listRunnerSessions(): Promise<RunnerSession[]> {
+  const response = await fetch(`${defaultRunnerUrl}/sessions`);
+  if (!response.ok) {
+    throw new Error(`Failed to list runner sessions: ${response.status} ${response.statusText}`);
+  }
+  const json = (await response.json()) as { sessions: RunnerSession[] };
+  return json.sessions;
+}
+
+export async function cancelRunnerSession(sessionId: string): Promise<RunnerSession> {
+  const response = await fetch(`${defaultRunnerUrl}/sessions/${sessionId}/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to cancel session: ${response.status} ${text}`);
+  }
+  return (await response.json()) as RunnerSession;
 }

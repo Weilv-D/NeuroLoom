@@ -72,6 +72,10 @@ Endpoints:
 
 - `POST /v1/chat/completions`
   Starts a new session from a prompt.
+- `GET /sessions`
+  Lists recent runner sessions and whether replay export is ready.
+- `POST /sessions/:sessionId/cancel`
+  Stops a live session and seals a partial replay.
 - `WS /live/:sessionId`
   Streams `session_started`, `token_step`, and `session_completed`.
 - `GET /sessions/:sessionId/trace`

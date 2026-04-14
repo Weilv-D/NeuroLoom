@@ -50,6 +50,8 @@ The runner supports two live sources:
 - `adapter`
   OpenAI-compatible backend bridge, with SSE streaming enabled by default.
 
+The app now also reads `GET /sessions` and can reopen or cancel recent runner sessions directly from the left panel.
+
 ## Boundary
 
 - One model: `Qwen/Qwen3.5-0.8B`
