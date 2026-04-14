@@ -4,6 +4,9 @@ coverage
 .DS_Store
 *.loomtrace
 test-results/
+__pycache__/
+*.tsbuildinfo
+.claude/
 # Training intermediates — the .onnx files themselves are committed
 apps/studio/public/models/*.npz
 apps/studio/public/models/*.onnx.data

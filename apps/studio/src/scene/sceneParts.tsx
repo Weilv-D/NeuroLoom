@@ -1,0 +1,544 @@
+import { QuadraticBezierLine, Sparkles, Stars, Text } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import { Bloom, ChromaticAberration, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { useMemo, useRef } from "react";
+
+import type { TraceBundle, TraceFrame } from "@neuroloom/core";
+import type { QwenFramePayload } from "@neuroloom/official-traces";
+import * as THREE from "three";
+
+import type { SelectionState } from "../types";
+
+import {
+  type FocusState,
+  addOffset,
+  clusterOffset,
+  focusForEdge,
+  focusForNode,
+  hashString,
+  quadraticPoint,
+  vectorToTuple,
+} from "./layoutUtils";
+import { NeuronField } from "./neuronField";
+
+// ---------- CameraRig ----------
+
+function CameraRig({
+  cameraPreset,
+  focusPosition,
+  live,
+}: {
+  cameraPreset: TraceBundle["manifest"]["camera_presets"][number];
+  focusPosition: { x: number; y: number; z: number } | null;
+  live: boolean;
+}) {
+  const { camera } = useThree();
+  const target = useMemo(
+    () => new THREE.Vector3(cameraPreset.target.x, cameraPreset.target.y, cameraPreset.target.z),
+    [cameraPreset.target],
+  );
+  const position = useMemo(
+    () => new THREE.Vector3(cameraPreset.position.x, cameraPreset.position.y, cameraPreset.position.z),
+    [cameraPreset.position],
+  );
+  const focusTarget = useMemo(
+    () => (focusPosition ? new THREE.Vector3(focusPosition.x, focusPosition.y, focusPosition.z) : null),
+    [focusPosition],
+  );
+  const lookAt = useMemo(() => new THREE.Vector3(), []);
+
+  useFrame((state) => {
+    const pulse = live ? Math.sin(state.clock.elapsedTime * 0.28) * 0.14 : 0;
+    camera.position.lerp(new THREE.Vector3(position.x, position.y + pulse, position.z), 0.06);
+    lookAt.copy(target);
+    if (focusTarget) {
+      lookAt.lerp(focusTarget, 0.16);
+    }
+    camera.lookAt(lookAt);
+  });
+
+  return null;
+}
+
+function NebulaField() {
+  return (
+    <group>
+      {[
+        { position: [-8, 4.5, -4], color: "#0a3a55", scale: [10, 5.5, 1.2], opacity: 0.28 },
+        { position: [2, -3.5, -3], color: "#102743", scale: [18, 8, 1.4], opacity: 0.22 },
+        { position: [12, 3.5, -5], color: "#3b2411", scale: [8, 4.5, 1], opacity: 0.16 },
+      ].map((cloud) => (
+        <mesh key={cloud.position.join(":")} position={cloud.position as [number, number, number]}>
+          <planeGeometry args={[cloud.scale[0], cloud.scale[1]]} />
+          <meshBasicMaterial color={cloud.color} transparent opacity={cloud.opacity} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function ResidualRiver({ points, live }: { points: [number, number, number][]; live: boolean }) {
+  const lineRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (!lineRef.current) return;
+    lineRef.current.position.y = live ? Math.sin(state.clock.elapsedTime * 0.7) * 0.08 : 0;
+  });
+
+  return (
+    <group ref={lineRef}>
+      <QuadraticBezierLine
+        start={points[0] ?? [-10, 0, 0]}
+        mid={[0, 0.55, 0]}
+        end={points.at(-1) ?? [10, 0, 0]}
+        color="#2de2ff"
+        lineWidth={2.6}
+        transparent
+        opacity={0.18}
+      />
+      <QuadraticBezierLine
+        start={points[0] ?? [-10, 0, 0]}
+        mid={[0, -0.2, 0]}
+        end={points.at(-1) ?? [10, 0, 0]}
+        color="#d7ff63"
+        lineWidth={1.2}
+        transparent
+        opacity={0.08}
+      />
+    </group>
+  );
+}
+
+// ---------- FlowLine: simplified block-to-block flow ----------
+
+function FlowLine({ from, to, live }: { from: [number, number, number]; to: [number, number, number]; live: boolean }) {
+  const pulseRef = useRef<THREE.Mesh>(null);
+  const hash = useMemo(() => from[0] * 1000 + to[0] * 100, [from, to]);
+
+  useFrame((state) => {
+    if (!pulseRef.current) return;
+    const speed = live ? 0.55 : 0.3;
+    const t = (state.clock.elapsedTime * speed + hash * 0.00007) % 1;
+    pulseRef.current.position.set(from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t);
+    pulseRef.current.scale.setScalar(0.12);
+  });
+
+  return (
+    <group>
+      <QuadraticBezierLine
+        start={from}
+        mid={[(from[0] + to[0]) / 2, Math.max(from[1], to[1]) + 0.4, 0]}
+        end={to}
+        color="#2de2ff"
+        lineWidth={1.8}
+        transparent
+        opacity={0.12}
+      />
+      <mesh ref={pulseRef}>
+        <sphereGeometry args={[0.07, 8, 8]} />
+        <meshBasicMaterial color="#2fe5ff" transparent opacity={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+function EdgeStream({
+  edgeId,
+  from,
+  to,
+  intensity,
+  direction,
+  focus,
+  live,
+}: {
+  edgeId: string;
+  from: [number, number, number];
+  to: [number, number, number];
+  intensity: number;
+  direction: string;
+  focus: FocusState;
+  live: boolean;
+}) {
+  const pulseRef = useRef<THREE.Mesh>(null);
+  const arcMid = useMemo<[number, number, number]>(() => {
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const lift = Math.abs(dy) < 0.4 ? 1.2 : 0.55;
+    return [from[0] + dx * 0.5, Math.max(from[1], to[1]) + lift, (from[2] + to[2]) / 2];
+  }, [from, to]);
+  const hash = useMemo(() => hashString(edgeId), [edgeId]);
+  const opacity = focus === "muted" ? 0.05 : focus === "selected" || focus === "related" ? 0.42 : 0.18;
+  const color = direction === "backward" ? "#ffb85f" : "#2fe5ff";
+
+  useFrame((state) => {
+    if (!pulseRef.current) return;
+    const speed = live ? 0.55 : 0.3;
+    const t = (state.clock.elapsedTime * speed + hash * 0.00007) % 1;
+    const point = quadraticPoint(from, arcMid, to, t);
+    pulseRef.current.position.set(point[0], point[1], point[2]);
+    pulseRef.current.scale.setScalar(0.22 + intensity * 0.3);
+  });
+
+  return (
+    <group>
+      <QuadraticBezierLine
+        start={from}
+        mid={arcMid}
+        end={to}
+        color={color}
+        lineWidth={focus === "selected" ? 2.3 : focus === "related" ? 1.5 : 1}
+        transparent
+        opacity={opacity + intensity * 0.16}
+      />
+      <mesh ref={pulseRef}>
+        <sphereGeometry args={[0.09, 10, 10]} />
+        <meshBasicMaterial color={color} transparent opacity={opacity + intensity * 0.22} />
+      </mesh>
+    </group>
+  );
+}
+
+// ---------- NodeAnchor: simplified structural anchor (replaces NodeCluster for key nodes) ----------
+
+function NodeAnchor({
+  nodeId: _nodeId,
+  label,
+  type,
+  position,
+  intensity,
+  emphasis,
+  focus,
+  onSelect,
+  showLabel,
+}: {
+  nodeId: string;
+  label: string;
+  type: string;
+  position: [number, number, number];
+  intensity: number;
+  emphasis: number;
+  focus: FocusState;
+  onSelect(): void;
+  showLabel: boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const focusScale = focus === "selected" ? 1.18 : focus === "related" ? 1.08 : 1;
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const wobble = 1 + Math.sin(state.clock.elapsedTime * 0.8 + intensity * 4.2) * 0.025;
+    groupRef.current.scale.setScalar(focusScale * wobble);
+  });
+
+  return (
+    <group
+      ref={groupRef}
+      position={position}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+    >
+      <mesh>
+        <sphereGeometry args={[0.09 + intensity * 0.15, 16, 16]} />
+        <meshStandardMaterial
+          color={type === "logits" || type === "decode" ? "#d7ff63" : "#2fe5ff"}
+          emissive={type === "logits" || type === "decode" ? "#d7ff63" : "#2fe5ff"}
+          emissiveIntensity={0.9 + emphasis * 1.6}
+          transparent
+          opacity={0.7}
+        />
+      </mesh>
+      {showLabel || type === "decode" || type === "logits" ? (
+        <Text
+          position={[0, 0.48, 0]}
+          fontSize={0.22}
+          color="#f5f8ff"
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.02}
+          outlineColor="#04070d"
+        >
+          {label}
+        </Text>
+      ) : null}
+    </group>
+  );
+}
+
+function TokenRail({
+  payload,
+  selection,
+  onSelect,
+}: {
+  payload: QwenFramePayload;
+  selection: SelectionState;
+  onSelect(selection: SelectionState): void;
+}) {
+  const startX = -15.2;
+  const y = 6.1;
+  return (
+    <group>
+      {payload.tokenWindow.map((token, index) => {
+        const absoluteIndex = payload.tokenIndex - payload.tokenWindow.length + index + 1;
+        const selected = selection?.kind === "token" && selection.id === `token-${absoluteIndex}`;
+        const x = startX + index * 0.58;
+        return (
+          <group
+            key={`${absoluteIndex}:${token}`}
+            position={[x, y + Math.sin(index * 0.55) * 0.14, -1.2]}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect({ kind: "token", id: `token-${absoluteIndex}` });
+            }}
+          >
+            <mesh>
+              <sphereGeometry args={[selected ? 0.15 : 0.11, 14, 14]} />
+              <meshBasicMaterial
+                color={selected ? "#d7ff63" : index === payload.tokenWindow.length - 1 ? "#2fe5ff" : "#eef2ff"}
+                transparent
+                opacity={0.8}
+              />
+            </mesh>
+            {selected || index === payload.tokenWindow.length - 1 ? (
+              <Text
+                position={[0, 0.34, 0]}
+                fontSize={0.18}
+                color="#eef2ff"
+                anchorX="center"
+                anchorY="middle"
+                outlineWidth={0.02}
+                outlineColor="#04070d"
+              >
+                {token.trim() || "space"}
+              </Text>
+            ) : null}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function LogitWaterfall({ payload }: { payload: QwenFramePayload }) {
+  return (
+    <group position={[15.5, -2.8, 0.4]}>
+      {payload.topLogits.map((logit, index) => {
+        const height = 0.4 + logit.score * 2.6;
+        return (
+          <group key={logit.token} position={[0, index * -0.8, 0]}>
+            <mesh position={[0, height / 2, 0]}>
+              <boxGeometry args={[0.24, height, 0.24]} />
+              <meshStandardMaterial
+                color={index === 0 ? "#d7ff63" : "#2fe5ff"}
+                emissive={index === 0 ? "#d7ff63" : "#2fe5ff"}
+                emissiveIntensity={0.7}
+              />
+            </mesh>
+            <Text
+              position={[0.64, 0.04, 0]}
+              fontSize={0.18}
+              color="#eef2ff"
+              anchorX="left"
+              anchorY="middle"
+              outlineWidth={0.02}
+              outlineColor="#04070d"
+            >
+              {`${logit.token.trim() || "space"} · ${logit.score.toFixed(2)}`}
+            </Text>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function SelectionHalo({ position }: { position: [number, number, number] }) {
+  const groupRef = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    groupRef.current.rotation.z = state.clock.elapsedTime * 0.4;
+    groupRef.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 3) * 0.06);
+  });
+
+  return (
+    <group ref={groupRef} position={position}>
+      <mesh>
+        <ringGeometry args={[0.4, 0.54, 48]} />
+        <meshBasicMaterial color="#d7ff63" transparent opacity={0.28} />
+      </mesh>
+    </group>
+  );
+}
+
+// ---------- SceneRoot: root 3D scene component ----------
+
+export function SceneRoot({
+  bundle,
+  frame,
+  payload,
+  selection,
+  onSelect,
+  live,
+  cameraPreset,
+}: {
+  bundle: TraceBundle;
+  frame: TraceFrame | null;
+  payload: QwenFramePayload | null;
+  selection: SelectionState;
+  onSelect(selection: SelectionState): void;
+  live: boolean;
+  cameraPreset: TraceBundle["manifest"]["camera_presets"][number];
+}) {
+  const nodeMap = useMemo(() => new Map(bundle.graph.nodes.map((node) => [node.id, node])), [bundle.graph.nodes]);
+  const nodeStateMap = useMemo(() => {
+    if (!frame) {
+      return new Map(
+        bundle.graph.nodes.map((node) => [
+          node.id,
+          {
+            nodeId: node.id,
+            activation: node.type === "residual" ? 0.28 : node.type === "logits" ? 0.18 : 0.12,
+            emphasis: node.type === "decode" ? 0.4 : 0.28,
+          },
+        ]),
+      );
+    }
+    return new Map(frame.node_states.map((state) => [state.nodeId, state]));
+  }, [bundle.graph.nodes, frame]);
+  const edgeStateMap = useMemo(() => {
+    if (!frame) {
+      return new Map(
+        bundle.graph.edges.map((edge) => [edge.id, { edgeId: edge.id, intensity: 0.16, direction: "forward", emphasis: 0.22 }]),
+      );
+    }
+    return new Map(frame.edge_states.map((state) => [state.edgeId, state]));
+  }, [bundle.graph.edges, frame]);
+
+  const focusedUnit = selection?.kind === "cluster" ? (payload?.sampledUnits.find((unit) => unit.id === selection.id) ?? null) : null;
+  const focusedNodeId =
+    selection?.kind === "node"
+      ? selection.id
+      : selection?.kind === "cluster"
+        ? (focusedUnit?.nodeId ?? null)
+        : selection?.kind === "token"
+          ? "decode"
+          : null;
+  const connectedNodeIds = new Set<string>();
+  const connectedEdgeIds = new Set<string>();
+
+  if (focusedNodeId) {
+    connectedNodeIds.add(focusedNodeId);
+    bundle.graph.edges.forEach((edge) => {
+      if (edge.source === focusedNodeId || edge.target === focusedNodeId) {
+        connectedNodeIds.add(edge.source);
+        connectedNodeIds.add(edge.target);
+        connectedEdgeIds.add(edge.id);
+      }
+    });
+  }
+
+  const focusPosition = focusedUnit
+    ? addOffset(nodeMap.get(focusedUnit.nodeId)?.position ?? { x: 0, y: 0, z: 0 }, clusterOffset(focusedUnit))
+    : focusedNodeId
+      ? (nodeMap.get(focusedNodeId)?.position ?? null)
+      : null;
+
+  const residualPoints = bundle.graph.nodes
+    .filter((node) => node.metadata.lane === "residual")
+    .map((node) => [node.position.x, node.position.y, node.position.z] as [number, number, number]);
+
+  // Build simplified block-level flow edges
+  const flowEdges = useMemo(() => {
+    const result: { id: string; from: [number, number, number]; to: [number, number, number]; intensity: number }[] = [];
+    const residualNodes = bundle.graph.nodes.filter((n) => n.metadata.lane === "residual");
+    for (let i = 0; i < residualNodes.length - 1; i++) {
+      const from = residualNodes[i]!;
+      const to = residualNodes[i + 1]!;
+      result.push({
+        id: `flow-${i}`,
+        from: [from.position.x, from.position.y, from.position.z],
+        to: [to.position.x, to.position.y, to.position.z],
+        intensity: 0.4,
+      });
+    }
+    return result;
+  }, [bundle.graph.nodes]);
+
+  return (
+    <>
+      <CameraRig cameraPreset={cameraPreset} focusPosition={focusPosition} live={live} />
+      <color attach="background" args={["#04070d"]} />
+      <fog attach="fog" args={["#04070d", 14, 48]} />
+      <ambientLight intensity={0.7} color="#cfe5ff" />
+      <pointLight position={[-10, 6, 12]} intensity={2.4} color="#2fe5ff" />
+      <pointLight position={[16, -6, 9]} intensity={1.8} color="#ffb85f" />
+      <pointLight position={[0, 12, 14]} intensity={1.15} color="#d7ff63" />
+      <Stars radius={50} depth={0} count={4200} factor={6} saturation={1} fade speed={1.2} />
+      <Sparkles count={260} scale={[32, 18, 10]} size={3.8} speed={0.25} opacity={0.5} color="#1fe8ff" />
+      <NebulaField />
+      <ResidualRiver points={residualPoints} live={live} />
+
+      <NeuronField graph={bundle.graph} frame={frame} selection={selection} onSelect={onSelect} live={live} />
+
+      {/* Simplified block-level flow edges */}
+      {flowEdges.map((fe) => (
+        <FlowLine key={fe.id} from={fe.from} to={fe.to} live={live} />
+      ))}
+
+      {/* Retain attention/delta/ffn branch edges for structural context */}
+      {bundle.graph.edges
+        .filter((edge) => edge.type.includes("branch") || edge.type === "decode-flow" || edge.type === "token-flow")
+        .map((edge) => {
+          const source = nodeMap.get(edge.source);
+          const target = nodeMap.get(edge.target);
+          const state = edgeStateMap.get(edge.id);
+          if (!source || !target || !state) return null;
+          return (
+            <EdgeStream
+              key={edge.id}
+              edgeId={edge.id}
+              from={vectorToTuple(source.position)}
+              to={vectorToTuple(target.position)}
+              intensity={state.intensity}
+              direction={state.direction}
+              focus={focusForEdge(edge.id, selection, connectedEdgeIds)}
+              live={live}
+            />
+          );
+        })}
+
+      {/* Structural anchor nodes (residual, prompt, decode, logits) */}
+      {bundle.graph.nodes.map((graphNode) => {
+        const nodeState = nodeStateMap.get(graphNode.id);
+        const lane = String(graphNode.metadata.lane ?? graphNode.type);
+        if (lane !== "residual" && lane !== "prompt" && lane !== "embedding" && graphNode.type !== "logits" && graphNode.type !== "decode")
+          return null;
+        return (
+          <NodeAnchor
+            key={graphNode.id}
+            nodeId={graphNode.id}
+            label={graphNode.label}
+            type={graphNode.type}
+            position={vectorToTuple(graphNode.position)}
+            intensity={Math.abs(nodeState?.activation ?? 0.12)}
+            emphasis={nodeState?.emphasis ?? 0.25}
+            focus={focusForNode(graphNode.id, selection, connectedNodeIds)}
+            onSelect={() => onSelect({ kind: "node", id: graphNode.id })}
+            showLabel={selection?.kind === "node" && selection.id === graphNode.id}
+          />
+        );
+      })}
+
+      {payload ? <TokenRail payload={payload} selection={selection} onSelect={onSelect} /> : null}
+      {payload ? <LogitWaterfall payload={payload} /> : null}
+      {focusPosition ? <SelectionHalo position={vectorToTuple(focusPosition)} /> : null}
+      <EffectComposer>
+        <Bloom luminanceThreshold={0.02} intensity={2.1} mipmapBlur />
+        <Noise opacity={0.025} />
+        <ChromaticAberration offset={[0.0012, 0.0016] as [number, number]} />
+        <Vignette offset={0.24} darkness={0.75} />
+      </EffectComposer>
+    </>
+  );
+}

@@ -1,38 +1,31 @@
 # NeuroLoom
 
-NeuroLoom is a live-first visual stage for `Qwen/Qwen3.5-0.8B`.
+<p align="center">
+  <img src="./docs/workflow.svg" alt="NeuroLoom Workflow" width="100%">
+</p>
 
-It turns a single text conversation into a dense starfield of residual flow, grouped attention, DeltaNet memory, and decode pressure. The same live session can then be exported as `.loomtrace` and replayed frame by frame.
+NeuroLoom is a live-first visual stage for transformer model activations, currently profiling `Qwen/Qwen3.5-0.8B`. It turns a text conversation into a dense starfield of residual flow, grouped attention, DeltaNet memory, and decode pressure. Sessions can be exported as `.loomtrace` and replayed frame by frame.
 
-## What It Is
+*Languages: [English](README.md), [简体中文](README_zh.md)*
 
-- One model only: `Qwen/Qwen3.5-0.8B`
-- One core experience: `live chat -> starfield -> replay export`
-- One visual language: dense star clusters, flowing arcs, logits waterfalls, and structural focus instead of abstract module boxes
+## Core Features
 
-NeuroLoom does not try to be a generic model debugger. It is a purpose-built stage for one Qwen profile.
-
-## Product Shape
-
-- `Live mode`
-  A local runner starts a Qwen session, streams token-step events over WebSocket, and drives the stage in real time.
-- `Replay mode`
-  The same session can be exported as `.loomtrace`, reloaded locally, scrubbed on a timeline, and inspected without the runner.
-- `Starfield renderer`
-  Structural nodes are rendered as luminous star clusters. Sampled units appear as fine-grained stars around each block. Flow arcs pulse between them as tokens move through the model.
+- **Live Session Streaming** — A local runner starts a Qwen session, streams token-step events over WebSocket, and drives the 3D stage in real time.
+- **Frame-by-Frame Replay** — Export any session as `.loomtrace`, reload locally, scrub on a timeline, and inspect without the runner.
+- **86,400 Neuron Starfield** — 24 transformer blocks × (3,584 FFN + 16 attention heads) rendered as a GPU point cloud with custom GLSL shaders.
+- **Real Activation Capture** — Python tool extracts actual neuron activations from transformer models via PyTorch forward hooks.
+- **Backend Adapter** — Plug in LM Studio, Ollama, or vLLM for live inference while preserving the NeuroLoom visual protocol.
 
 ## Monorepo Layout
 
-- `apps/studio`
-  React + Vite + React Three Fiber frontend for the live/replay stage.
-- `packages/core`
-  `.loomtrace` schema, archive I/O, validator, replay engine, and renderer contract.
-- `packages/official-traces`
-  Qwen-only session recorder, sample trace builder, and live event definitions.
-- `tools/exporters`
-  Generates the official fallback replay: `qwen3.5-0.8b-sample.loomtrace`.
-- `tools/runner`
-  Local NeuroLoom Runner with chat initiation, WebSocket live stream, and trace export.
+| Package | Description |
+|---------|-------------|
+| `packages/core` | Zod schemas, ReplayEngine, `.loomtrace` archive I/O, validator |
+| `packages/official-traces` | Qwen synthetic trace generation, live session recorder |
+| `apps/studio` | React 19 + Vite + R3F 3D visualization frontend |
+| `tools/runner` | Local proxy server (WebSocket + SSE) for live inference |
+| `tools/exporters` | Generates the official fallback replay `.loomtrace` |
+| `tools/activation-capture` | Python tool: real neuron activations via PyTorch hooks |
 
 ## Quick Start
 
@@ -41,65 +34,68 @@ Requirements:
 - `Node.js 22+`
 - `pnpm 10+`
 
-Install and generate the official replay:
+Install and launch:
 
 ```bash
 pnpm install
-pnpm generate:traces
-```
-
-Run the frontend only:
-
-```bash
+pnpm build
 pnpm dev
 ```
 
-Run the local live runner in another terminal:
+`pnpm dev` backgrounds trace generation and starts Vite immediately at `http://localhost:5173`.
+
+Run the live runner in another terminal:
 
 ```bash
-pnpm dev:runner
+pnpm dev:runner:ollama    # or :lmstudio / :vllm
 ```
 
-Or start it with a backend profile already loaded:
+If the runner is not available, the app falls back to the synthetic replay bundle.
+
+## Real Activation Capture
+
+Extract real neuron activations from any compatible transformer model:
 
 ```bash
-pnpm dev:runner:lmstudio
-pnpm dev:runner:ollama
-pnpm dev:runner:vllm
+cd tools/activation-capture
+pip install -r requirements.txt
+
+# Generate a .loomtrace with real activations
+python capture.py --prompt "Hello, how are you?" --model Qwen/Qwen3.5-0.8B --output trace.loomtrace
+
+# Or stream live to a running NeuroLoom runner
+python capture.py --prompt "Explain quantum computing" --runner-url ws://127.0.0.1:7778
 ```
 
-Then open `http://localhost:5173`.
+The capture tool uses PyTorch forward hooks on each transformer block's MLP and attention layers, producing neuron activations that match the 86,400-neuron layout exactly.
 
-If the runner is not available, the app falls back to the official replay bundle.
+## Commands
+
+```bash
+pnpm build              # full monorepo build (traces + all packages)
+pnpm dev                # start studio with backgrounded trace generation
+pnpm test               # run all tests (41 total)
+pnpm lint               # eslint check
+pnpm format:check       # prettier check
+pnpm generate:traces    # rebuild core → official-traces → exporters
+pnpm validate:samples   # validate generated .loomtrace against schema
+pnpm dev:runner         # start runner (synthetic mode)
+pnpm dev:runner:ollama  # start runner with Ollama backend
+pnpm dev:runner:lmstudio # start runner with LM Studio backend
+pnpm dev:runner:vllm    # start runner with vLLM backend
+```
 
 ## Local Runner
 
-The runner is the standard live transport for NeuroLoom.
-
 Endpoints:
 
-- `POST /v1/chat/completions`
-  Starts a new session from a prompt.
-- `GET /sessions`
-  Lists recent runner sessions and whether replay export is ready.
-- `POST /sessions/:sessionId/cancel`
-  Stops a live session and seals a partial replay.
-- `GET /backend/probe`
-  Verifies whether the configured backend is reachable and lists the models it reports.
-- `WS /live/:sessionId`
-  Streams `session_started`, `token_step`, and `session_completed`.
-- `GET /sessions/:sessionId/trace`
-  Exports the finished session as `.loomtrace`.
-- `GET /health`
-  Reports runner status and mode.
-
-By default the runner uses a deterministic synthetic text source so the stage works immediately. If you provide an OpenAI-compatible backend, the runner can adapt a real text completion endpoint while still emitting NeuroLoom-specific live events.
-
-When `NEUROLOOM_BACKEND_URL` is set, the runner now prefers `stream: true` and bridges SSE token deltas into NeuroLoom `token_step` events in real time. Set `NEUROLOOM_BACKEND_STREAM=false` to force buffered adapter mode.
-
-In adapter mode, NeuroLoom keeps its canonical model identity in the UI while remapping live inference requests to `NEUROLOOM_BACKEND_MODEL`. This is required for local backends that expose Qwen under provider-specific IDs such as `qwen3.5:0.8b`.
-
-For Ollama-backed Qwen sessions, the runner defaults to `think=false` so the token budget is spent on answer content instead of reasoning trace. Override this with `NEUROLOOM_BACKEND_THINK=true` if you explicitly want reasoning-enabled streams.
+- `POST /v1/chat/completions` — start a new session from a prompt
+- `GET /sessions` — list recent sessions
+- `POST /sessions/:sessionId/cancel` — stop a live session
+- `GET /backend/probe` — verify backend reachability
+- `WS /live/:sessionId` — stream live token events
+- `GET /sessions/:sessionId/trace` — export session as `.loomtrace`
+- `GET /health` — runner status and mode
 
 Environment variables:
 
@@ -112,70 +108,10 @@ Environment variables:
 - `NEUROLOOM_BACKEND_PROVIDER`
 - `NEUROLOOM_SESSION_RETENTION`
 
-## Backend Profiles
+See [docs/backends.md](./docs/backends.md) for backend setup notes.
 
-NeuroLoom now recognizes common local Qwen backends and surfaces the detected provider in the UI and `/health`.
+## `.loomtrace` Format
 
-- `LM Studio`
-  Use [tools/runner/examples/lmstudio.env.example](./tools/runner/examples/lmstudio.env.example)
-- `Ollama`
-  Use [tools/runner/examples/ollama.env.example](./tools/runner/examples/ollama.env.example)
-- `vLLM`
-  Use [tools/runner/examples/vllm.env.example](./tools/runner/examples/vllm.env.example)
-- `custom`
-  Set `NEUROLOOM_BACKEND_URL` to any OpenAI-compatible chat endpoint. Use `NEUROLOOM_BACKEND_PROVIDER=custom` if the URL is ambiguous.
+Each frame carries: token text, layer norms, residual bands, grouped attention scores, attention row summary, sampled unit stars, top logits, camera anchor, and per-neuron activation states.
 
-See [docs/backends.md](./docs/backends.md) for setup notes and launch examples.
-
-## `.loomtrace`
-
-NeuroLoom still uses `.loomtrace` as its replay bundle format.
-
-In this project the supported profile is intentionally narrow:
-
-- `family: transformer`
-- `model profile: Qwen3.5-0.8B`
-- live session = replay session
-- each generated token = one replay frame
-
-Each frame carries:
-
-- token text
-- layer norms
-- residual bands
-- grouped attention scores
-- attention row summary
-- sampled unit stars
-- top logits
-- camera anchor
-
-See [docs/loomtrace-spec.md](./docs/loomtrace-spec.md) for the profile details.
-
-## Commands
-
-```bash
-pnpm generate:traces
-pnpm validate:samples
-pnpm dev
-pnpm dev:runner
-pnpm dev:runner:lmstudio
-pnpm dev:runner:ollama
-pnpm dev:runner:vllm
-pnpm doctor:runner:lmstudio
-pnpm doctor:runner:ollama
-pnpm doctor:runner:vllm
-pnpm build
-pnpm test
-pnpm test:visual
-```
-
-## Scope Boundary
-
-- Single-model only
-- Language-only only
-- Local runner first
-- Replay export preserved
-- No multi-model family switcher
-- No Story Mode / Studio Mode split
-- No browser ONNX rebuild path
-- No arbitrary runtime capture API
+See [docs/loomtrace-spec.md](./docs/loomtrace-spec.md) for the full profile specification.

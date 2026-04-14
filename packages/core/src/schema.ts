@@ -49,6 +49,7 @@ export const manifestSchema = z.object({
   visual_semantics: visualSemanticsSchema,
   payload_catalog: z.array(payloadCatalogEntrySchema),
   narrative_ref: z.string(),
+  data_source: z.enum(["synthetic", "real"]).optional(),
 });
 
 export const graphNodeSchema = z.object({
@@ -150,3 +151,65 @@ export type TraceBundle = {
   payloads: Map<string, string>;
   preview?: Uint8Array;
 };
+
+// ---------- Qwen payload schemas ----------
+
+export const qwenTopLogitSchema = z.object({
+  token: z.string(),
+  score: z.number(),
+});
+
+export const qwenBlockDigestSchema = z.object({
+  block: z.number().int().nonnegative(),
+  residual: z.number(),
+  attention: z.number(),
+  delta: z.number(),
+  ffn: z.number(),
+});
+
+export const qwenSampleUnitSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  nodeId: z.string(),
+  block: z.number().int().nonnegative(),
+  lane: z.enum(["residual", "attention", "delta", "ffn"]),
+  cluster: z.number().int().nonnegative(),
+  intensity: z.number(),
+  polarity: z.number(),
+  tokenAffinity: z.number(),
+});
+
+export const qwenFramePayloadSchema = z.object({
+  kind: z.literal("qwen-frame"),
+  model: z.string(),
+  prompt: z.string(),
+  completion: z.string(),
+  token: z.string(),
+  tokenIndex: z.number().int().nonnegative(),
+  tokenWindow: z.array(z.string()),
+  layerNorms: z.array(z.number()),
+  residualBands: z.array(z.number()),
+  headGroupScores: z.array(z.array(z.number())),
+  attentionRow: z.array(z.number()),
+  sampledUnits: z.array(qwenSampleUnitSchema),
+  topLogits: z.array(qwenTopLogitSchema),
+  blockDigest: z.array(qwenBlockDigestSchema),
+  cameraAnchor: z.string(),
+});
+
+export const qwenRenderPayloadSchema = z.object({
+  headline: z.string(),
+  prompt: z.string(),
+  completion: z.string(),
+  token: z.string(),
+  tokenIndex: z.number().int().nonnegative(),
+  layerSweep: z.array(z.number()),
+  sampledUnits: z.array(qwenSampleUnitSchema),
+  topLogits: z.array(qwenTopLogitSchema),
+});
+
+export type QwenFramePayload = z.infer<typeof qwenFramePayloadSchema>;
+export type QwenRenderPayload = z.infer<typeof qwenRenderPayloadSchema>;
+export type QwenTopLogit = z.infer<typeof qwenTopLogitSchema>;
+export type QwenBlockDigest = z.infer<typeof qwenBlockDigestSchema>;
+export type QwenSampleUnit = z.infer<typeof qwenSampleUnitSchema>;

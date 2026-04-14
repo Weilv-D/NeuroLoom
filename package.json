@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.26.1",
   "scripts": {
     "build": "pnpm generate:traces && pnpm -r --if-present build",
-    "dev": "pnpm generate:traces && pnpm --filter @neuroloom/studio dev",
+    "dev": "(pnpm generate:traces > /dev/null 2>&1 &) && pnpm --filter @neuroloom/studio dev",
     "dev:runner": "pnpm --filter @neuroloom/runner dev",
     "dev:runner:lmstudio": "pnpm --filter @neuroloom/runner dev:lmstudio",
     "dev:runner:ollama": "pnpm --filter @neuroloom/runner dev:ollama",

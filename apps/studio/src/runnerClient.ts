@@ -1,6 +1,6 @@
 import type { QwenLiveEvent } from "@neuroloom/official-traces";
 
-const defaultRunnerUrl = ((import.meta.env as { VITE_NEUROLOOM_RUNNER_URL?: string }).VITE_NEUROLOOM_RUNNER_URL ??
+const defaultRunnerUrl = (((import.meta as { env?: Record<string, string> }).env ?? {})?.VITE_NEUROLOOM_RUNNER_URL ??
   "http://127.0.0.1:7778") as string;
 
 export type RunnerHealth = {

@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "pnpm --filter @neuroloom/core build && pnpm --filter @neuroloom/official-traces build",
+    "build": "tsx src/generate.ts",
     "generate": "tsx src/generate.ts"
   },
   "dependencies": {
