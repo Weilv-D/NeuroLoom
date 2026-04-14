@@ -66,28 +66,58 @@ export function buildGraph() {
       edge(`ffn-return-${block}`, ffnId, block === qwenBlockCount - 1 ? "logits" : blockNodeId("residual", block + 1), "ffn-return", 0.88),
     );
 
-    // FFN neurons: arc star-band layout
+    // FFN neurons: galaxy-style nebula distribution
     const ffnRng = seeded(`neurons:${block}`, 42);
+    // Base center for the block
     const ffnCenterX = x + 0.02;
-    const ffnCenterY = -5.2 + waveOffset * 0.25;
+    const ffnCenterY = -1.0 + waveOffset * 0.25; // Shifted closer to center
     for (let idx = 0; idx < qwenFfnNeuronsPerBlock; idx++) {
       const neuronId = `neuron:${block}:${idx}`;
-      const pos = neuronArcPosition(ffnCenterX, ffnCenterY, idx, ffnGridWidth, ffnGridHeight, ffnRng);
+      
+      // Generate spherical/ellipsoid coordinates with focus on a central band
+      const u = ffnRng();
+      const v = ffnRng();
+      const w = ffnRng();
+      
+      // Use power to cluster more points toward the center, but allow far outliers
+      const radius = Math.pow(w, 2.5) * 12.0; 
+      const theta = u * Math.PI * 2.0;
+      const phi = Math.acos(2.0 * v - 1.0);
+      
+      // Apply swirl effect based on X (block position) and angle
+      const swirl = (block / qwenBlockCount) * Math.PI * 1.5;
+      
+      const nx = radius * Math.sin(phi) * Math.cos(theta + swirl);
+      const ny = radius * Math.cos(phi) * 0.45; // Squashed vertically for galactic disc
+      const nz = radius * Math.sin(phi) * Math.sin(theta + swirl) * 0.8;
+      
+      const pos: [number, number, number] = [
+        round3(ffnCenterX + nx),
+        round3(ffnCenterY + ny),
+        round3(nz)
+      ];
       neurons.push({ id: neuronId, block, index: idx, lane: "ffn" });
       neuronPositions[neuronId] = pos;
     }
 
-    // Attention heads: satellite positions (independent RNG)
+    // Attention heads: orbit the FFN clouds in outer spherical bands
     const attnRng = seeded(`attn:${block}`, 7);
-    const attnCenterX = x - 0.04;
-    const attnCenterY = 3.1 + waveOffset;
     for (let head = 0; head < qwenAttnHeadsPerBlock; head++) {
       const neuronId = `attn_head:${block}:${head}`;
-      const angle = (head / qwenAttnHeadsPerBlock) * Math.PI * 2 + block * 0.3;
-      const radius = 0.45 + (head % 3) * 0.12;
-      const hx = attnCenterX + Math.cos(angle) * radius + (attnRng() - 0.5) * 0.1;
-      const hy = attnCenterY + Math.sin(angle) * radius * 0.6 + (attnRng() - 0.5) * 0.08;
-      const hz = 0.55 + Math.sin(angle) * radius * 0.3;
+      
+      // Orbiting spheres, randomly distributed but generally larger radius
+      const u = attnRng();
+      const v = attnRng();
+      
+      // Heads orbit further out like globular clusters
+      const radius = 6.0 + attnRng() * 4.0;
+      const theta = u * Math.PI * 2.0;
+      const phi = Math.acos(2.0 * v - 1.0);
+      
+      const hx = ffnCenterX + radius * Math.sin(phi) * Math.cos(theta);
+      const hy = ffnCenterY + radius * Math.cos(phi) * 0.8;
+      const hz = radius * Math.sin(phi) * Math.sin(theta);
+      
       neurons.push({ id: neuronId, block, index: head, lane: "attn_head" });
       neuronPositions[neuronId] = [round3(hx), round3(hy), round3(hz)];
     }

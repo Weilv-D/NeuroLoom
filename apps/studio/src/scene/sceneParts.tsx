@@ -477,61 +477,10 @@ export function SceneRoot({
       <Stars radius={50} depth={0} count={4200} factor={6} saturation={1} fade speed={1.2} />
       <Sparkles count={260} scale={[32, 18, 10]} size={3.8} speed={0.25} opacity={0.5} color="#1fe8ff" />
       <NebulaField />
-      <ResidualRiver points={residualPoints} live={live} />
 
+      {/* Pure, textless natural fluid starfield. Rigid UI paths and anchors removed. */}
       <NeuronField graph={bundle.graph} frame={frame} selection={selection} onSelect={onSelect} live={live} />
 
-      {/* Simplified block-level flow edges */}
-      {flowEdges.map((fe) => (
-        <FlowLine key={fe.id} from={fe.from} to={fe.to} live={live} />
-      ))}
-
-      {/* Retain attention/delta/ffn branch edges for structural context */}
-      {bundle.graph.edges
-        .filter((edge) => edge.type.includes("branch") || edge.type === "decode-flow" || edge.type === "token-flow")
-        .map((edge) => {
-          const source = nodeMap.get(edge.source);
-          const target = nodeMap.get(edge.target);
-          const state = edgeStateMap.get(edge.id);
-          if (!source || !target || !state) return null;
-          return (
-            <EdgeStream
-              key={edge.id}
-              edgeId={edge.id}
-              from={vectorToTuple(source.position)}
-              to={vectorToTuple(target.position)}
-              intensity={state.intensity}
-              direction={state.direction}
-              focus={focusForEdge(edge.id, selection, connectedEdgeIds)}
-              live={live}
-            />
-          );
-        })}
-
-      {/* Structural anchor nodes (residual, prompt, decode, logits) */}
-      {bundle.graph.nodes.map((graphNode) => {
-        const nodeState = nodeStateMap.get(graphNode.id);
-        const lane = String(graphNode.metadata.lane ?? graphNode.type);
-        if (lane !== "residual" && lane !== "prompt" && lane !== "embedding" && graphNode.type !== "logits" && graphNode.type !== "decode")
-          return null;
-        return (
-          <NodeAnchor
-            key={graphNode.id}
-            nodeId={graphNode.id}
-            label={graphNode.label}
-            type={graphNode.type}
-            position={vectorToTuple(graphNode.position)}
-            intensity={Math.abs(nodeState?.activation ?? 0.12)}
-            emphasis={nodeState?.emphasis ?? 0.25}
-            focus={focusForNode(graphNode.id, selection, connectedNodeIds)}
-            onSelect={() => onSelect({ kind: "node", id: graphNode.id })}
-            showLabel={selection?.kind === "node" && selection.id === graphNode.id}
-          />
-        );
-      })}
-
-      {payload ? <TokenRail payload={payload} selection={selection} onSelect={onSelect} /> : null}
-      {payload ? <LogitWaterfall payload={payload} /> : null}
       {focusPosition ? <SelectionHalo position={vectorToTuple(focusPosition)} /> : null}
       <EffectComposer>
         <Bloom luminanceThreshold={0.02} intensity={2.1} mipmapBlur />

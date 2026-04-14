@@ -87,16 +87,19 @@ export function NeuronField({
       const id = neuronIds[i]!;
       let activation = neuronStateMap.get(id) ?? 0;
 
-      // Pulse effect: add time-based shimmer for active neurons
+      // Base starry twinkle and natural breathing
+      const baseShimmer = (Math.sin(time * 1.5 + i * 0.1) * 0.5 + 0.5) * 0.05;
+      
+      // Pulse effect for active points
       const act = Math.abs(activation);
-      if (act > 0.1) {
-        const shimmer = Math.sin(time * 3.0 + i * 0.007) * 0.06 * act;
-        activation = activation + shimmer;
-      }
+      const intensityShimmer = act > 0.1 ? Math.sin(time * 3.0 + i * 0.007) * 0.06 * act : 0;
+      
+      activation = Math.max(activation + intensityShimmer, baseShimmer);
 
       const absAct = Math.abs(activation);
-      const baseSize = 0.006;
-      const size = baseSize + absAct * absAct * 0.03;
+      // Make particles varied in size for better parallax
+      const baseSize = 0.008 + (i % 3) * 0.003; 
+      const size = baseSize + absAct * absAct * 0.05;
 
       sizeAttr.setX(i, size);
       actAttr.setX(i, activation);
