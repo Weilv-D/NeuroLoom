@@ -47,6 +47,7 @@ const backendProvider = process.env.NEUROLOOM_BACKEND_PROVIDER?.trim() ?? "";
 const mode: RunnerMode = backendUrl ? "adapter" : "synthetic";
 const sessionRetention = Number(process.env.NEUROLOOM_SESSION_RETENTION ?? "12");
 const backendProfile = detectBackendProfile(backendUrl, backendProvider);
+const backendThink = resolveBackendThinkSetting(process.env.NEUROLOOM_BACKEND_THINK, backendProfile.provider);
 
 const sessions = new Map<string, SessionRecord>();
 
@@ -132,6 +133,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       backendLabel: backendProfile.label,
       backendDetectedFrom: backendProfile.detectedFrom,
       backendSetupHint: backendProfile.setupHint,
+      backendThink: backendThink ?? null,
       sessions: sessions.size,
       liveEndpoint: `/live/:sessionId`,
       probeEndpoint: `/backend/probe`,
@@ -351,13 +353,7 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
       "Content-Type": "application/json",
       ...(backendApiKey ? { Authorization: `Bearer ${backendApiKey}` } : {}),
     },
-    body: JSON.stringify({
-      model: effectiveModel,
-      messages: request.messages,
-      max_tokens: request.max_tokens ?? 160,
-      temperature: request.temperature ?? 0.7,
-      stream: true,
-    }),
+    body: JSON.stringify(buildBackendRequestBody(request, effectiveModel, true)),
   });
   if (!response.ok) {
     throw new Error(`Adapter backend failed: ${response.status} ${response.statusText}`);
@@ -376,6 +372,7 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
   let completion = "";
   let emittedTokenCount = 0;
   let isDone = false;
+  let sawReasoning = false;
 
   while (!isDone) {
     if (session.abortController.signal.aborted) {
@@ -393,20 +390,27 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
     for (const rawEvent of events) {
       const parsed = parseSseEvent(rawEvent);
       if (!parsed) continue;
+      if (parsed.reasoning) {
+        sawReasoning = true;
+      }
+      if (parsed.content) {
+        completion += parsed.content;
+        session.completion = completion;
+        session.updatedAt = Date.now();
+        emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
+      }
       if (parsed.done) {
         isDone = true;
         break;
       }
-      if (!parsed.content) continue;
-      completion += parsed.content;
-      session.completion = completion;
-      session.updatedAt = Date.now();
-      emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
     }
   }
 
   if (buffer.trim()) {
     const parsed = parseSseEvent(buffer);
+    if (parsed?.reasoning) {
+      sawReasoning = true;
+    }
     if (parsed?.content) {
       completion += parsed.content;
       session.completion = completion;
@@ -417,6 +421,9 @@ async function streamBackendCompletion(session: SessionRecord, request: ChatComp
 
   emitFreshTokens(session, completion, emittedTokenCount, true);
   session.completion = completion;
+  if (!completion.trim() && sawReasoning) {
+    throw new Error("Adapter backend emitted reasoning without a final answer. Disable backend thinking or increase max_tokens.");
+  }
   return completion;
 }
 
@@ -428,13 +435,7 @@ async function resolveBufferedCompletionText(_prompt: string, request: ChatCompl
       "Content-Type": "application/json",
       ...(backendApiKey ? { Authorization: `Bearer ${backendApiKey}` } : {}),
     },
-    body: JSON.stringify({
-      model: effectiveModel,
-      messages: request.messages,
-      max_tokens: request.max_tokens ?? 160,
-      temperature: request.temperature ?? 0.7,
-      stream: false,
-    }),
+    body: JSON.stringify(buildBackendRequestBody(request, effectiveModel, false)),
   });
   if (!response.ok) {
     throw new Error(`Adapter backend failed: ${response.status} ${response.statusText}`);
@@ -470,8 +471,16 @@ function broadcastEvent(session: SessionRecord, event: QwenLiveEvent) {
 async function extractBufferedCompletionFromResponse(response: Response) {
   const json = (await response.json()) as {
     choices?: Array<{
-      delta?: { content?: string | Array<{ text?: string; type?: string }> };
-      message?: { content?: string | Array<{ text?: string; type?: string }> };
+      delta?: {
+        content?: string | Array<{ text?: string; type?: string }>;
+        reasoning?: string | Array<{ text?: string; type?: string }>;
+        thinking?: string | Array<{ text?: string; type?: string }>;
+      };
+      message?: {
+        content?: string | Array<{ text?: string; type?: string }>;
+        reasoning?: string | Array<{ text?: string; type?: string }>;
+        thinking?: string | Array<{ text?: string; type?: string }>;
+      };
     }>;
   };
   const choice = json.choices?.[0];
@@ -479,6 +488,9 @@ async function extractBufferedCompletionFromResponse(response: Response) {
   const extracted = extractContentString(content);
   if (extracted.trim()) {
     return extracted;
+  }
+  if (extractReasoningString(choice).trim()) {
+    throw new Error("Adapter backend returned reasoning without a final answer. Disable backend thinking or increase max_tokens.");
   }
   throw new Error("Adapter backend returned an empty completion.");
 }
@@ -498,15 +510,24 @@ function parseSseEvent(rawEvent: string) {
   }
   const json = JSON.parse(data) as {
     choices?: Array<{
-      delta?: { content?: string | Array<{ text?: string; type?: string }> };
-      message?: { content?: string | Array<{ text?: string; type?: string }> };
+      delta?: {
+        content?: string | Array<{ text?: string; type?: string }>;
+        reasoning?: string | Array<{ text?: string; type?: string }>;
+        thinking?: string | Array<{ text?: string; type?: string }>;
+      };
+      message?: {
+        content?: string | Array<{ text?: string; type?: string }>;
+        reasoning?: string | Array<{ text?: string; type?: string }>;
+        thinking?: string | Array<{ text?: string; type?: string }>;
+      };
       finish_reason?: string | null;
     }>;
   };
   const choice = json.choices?.[0];
   return {
-    done: choice?.finish_reason === "stop",
+    done: choice?.finish_reason != null,
     content: extractContentString(choice?.delta?.content ?? choice?.message?.content),
+    reasoning: extractReasoningString(choice),
   };
 }
 
@@ -518,6 +539,47 @@ function extractContentString(content: string | Array<{ text?: string; type?: st
     return content.map((part) => part.text ?? "").join("");
   }
   return "";
+}
+
+function extractReasoningString(
+  choice:
+    | {
+        delta?: {
+          reasoning?: string | Array<{ text?: string; type?: string }>;
+          thinking?: string | Array<{ text?: string; type?: string }>;
+        };
+        message?: {
+          reasoning?: string | Array<{ text?: string; type?: string }>;
+          thinking?: string | Array<{ text?: string; type?: string }>;
+        };
+      }
+    | undefined,
+) {
+  return extractContentString(
+    choice?.delta?.reasoning ?? choice?.delta?.thinking ?? choice?.message?.reasoning ?? choice?.message?.thinking,
+  );
+}
+
+function buildBackendRequestBody(request: ChatCompletionRequest, effectiveModel: string, stream: boolean) {
+  return {
+    model: effectiveModel,
+    messages: request.messages,
+    ...(typeof request.max_tokens === "number" ? { max_tokens: request.max_tokens } : {}),
+    temperature: request.temperature ?? 0.7,
+    stream,
+    ...(backendThink === undefined ? {} : { think: backendThink }),
+  };
+}
+
+function resolveBackendThinkSetting(rawValue: string | undefined, provider: string) {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) {
+    return provider === "ollama" ? false : undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return trimmed;
 }
 
 function emitFreshTokens(session: SessionRecord, completion: string, emittedTokenCount: number, flushLast = false) {

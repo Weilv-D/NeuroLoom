@@ -11,6 +11,8 @@ type MockRequestRecord = {
   model: string;
   messages: Array<{ role?: string; content?: string }>;
   stream: boolean;
+  think?: boolean | string;
+  max_tokens?: number;
 };
 
 test("adapter mode probes backend and forwards the effective model", async (t) => {
@@ -34,6 +36,8 @@ test("adapter mode probes backend and forwards the effective model", async (t) =
         model: body.model,
         messages: body.messages ?? [],
         stream: Boolean(body.stream),
+        think: body.think,
+        max_tokens: body.max_tokens,
       });
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(
@@ -139,6 +143,120 @@ test("adapter mode probes backend and forwards the effective model", async (t) =
   assert.equal(backendRequests.length, 1, `expected one backend request, got ${backendRequests.length}\n${runnerOutput.join("")}`);
   assert.equal(backendRequests[0]?.model, "qwen3.5:0.8b");
   assert.equal(backendRequests[0]?.stream, false);
+});
+
+test("adapter streaming tolerates Ollama reasoning chunks and completes with final content", async (t) => {
+  const backendRequests: MockRequestRecord[] = [];
+  const backendPort = await getAvailablePort();
+  const runnerPort = await getAvailablePort();
+  const runnerRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+  const backendServer = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+
+    if (request.method === "GET" && url.pathname === "/v1/models") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "qwen3.5:0.8b" }] }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
+      const body = await readJson(request);
+      backendRequests.push({
+        model: body.model,
+        messages: body.messages ?? [],
+        stream: Boolean(body.stream),
+        think: body.think,
+        max_tokens: body.max_tokens,
+      });
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          choices: [{ index: 0, delta: { role: "assistant", content: "", reasoning: "Thinking" }, finish_reason: null }],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          choices: [{ index: 0, delta: { role: "assistant", content: "", reasoning: "..." }, finish_reason: null }],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          choices: [{ index: 0, delta: { role: "assistant", content: "ready" }, finish_reason: "stop" }],
+        })}\n\n`,
+      );
+      response.write("data: [DONE]\n\n");
+      response.end();
+      return;
+    }
+
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+
+  backendServer.listen(backendPort, "127.0.0.1");
+  await once(backendServer, "listening");
+  t.after(async () => {
+    backendServer.close();
+    await once(backendServer, "close");
+  });
+
+  const runner = spawn(resolvePnpmBinary(), ["exec", "tsx", "src/server.ts"], {
+    cwd: runnerRoot,
+    env: {
+      ...process.env,
+      NEUROLOOM_RUNNER_PORT: String(runnerPort),
+      NEUROLOOM_BACKEND_URL: `http://127.0.0.1:${backendPort}`,
+      NEUROLOOM_BACKEND_MODEL: "qwen3.5:0.8b",
+      NEUROLOOM_BACKEND_PROVIDER: "ollama",
+      NEUROLOOM_BACKEND_STREAM: "true",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  t.after(async () => {
+    await stopProcess(runner);
+  });
+
+  await waitForRunnerHealth(runnerPort);
+
+  const completion = (await fetchJson(`http://127.0.0.1:${runnerPort}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "Qwen/Qwen3.5-0.8B",
+      messages: [{ role: "user", content: "Reply with exactly one word: ready" }],
+    }),
+  })) as {
+    neuroloom: {
+      session_id: string;
+    };
+  };
+
+  await waitFor(
+    async () => {
+      const sessions = (await fetchJson(`http://127.0.0.1:${runnerPort}/sessions`)) as {
+        sessions: Array<{ id: string; status: string; completion: string; archiveReady: boolean }>;
+      };
+      const session = sessions.sessions.find((entry) => entry.id === completion.neuroloom.session_id);
+      if (!session) {
+        return false;
+      }
+      return session.status === "complete" && session.completion === "ready" && session.archiveReady;
+    },
+    5_000,
+    "runner stream session did not complete with final content",
+  );
+
+  assert.equal(backendRequests.length, 1);
+  assert.equal(backendRequests[0]?.model, "qwen3.5:0.8b");
+  assert.equal(backendRequests[0]?.stream, true);
+  assert.equal(backendRequests[0]?.think, false);
+  assert.equal(backendRequests[0]?.max_tokens, undefined);
 });
 
 async function waitForRunnerHealth(port: number) {

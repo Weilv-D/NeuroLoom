@@ -99,6 +99,8 @@ When `NEUROLOOM_BACKEND_URL` is set, the runner now prefers `stream: true` and b
 
 In adapter mode, NeuroLoom keeps its canonical model identity in the UI while remapping live inference requests to `NEUROLOOM_BACKEND_MODEL`. This is required for local backends that expose Qwen under provider-specific IDs such as `qwen3.5:0.8b`.
 
+For Ollama-backed Qwen sessions, the runner defaults to `think=false` so the token budget is spent on answer content instead of reasoning trace. Override this with `NEUROLOOM_BACKEND_THINK=true` if you explicitly want reasoning-enabled streams.
+
 Environment variables:
 
 - `NEUROLOOM_RUNNER_PORT`
@@ -106,6 +108,7 @@ Environment variables:
 - `NEUROLOOM_BACKEND_API_KEY`
 - `NEUROLOOM_BACKEND_MODEL`
 - `NEUROLOOM_BACKEND_STREAM`
+- `NEUROLOOM_BACKEND_THINK`
 - `NEUROLOOM_BACKEND_PROVIDER`
 - `NEUROLOOM_SESSION_RETENTION`
 

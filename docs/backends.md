@@ -27,6 +27,8 @@ NeuroLoom always presents the canonical profile as `Qwen/Qwen3.5-0.8B`, but in a
   Bearer token for protected backends.
 - `NEUROLOOM_BACKEND_STREAM`
   Defaults to `true`. Set to `false` to force buffered mode.
+- `NEUROLOOM_BACKEND_THINK`
+  Optional thinking control. NeuroLoom defaults this to `false` for Ollama-backed Qwen sessions so streamed answers do not get consumed by reasoning traces first.
 - `NEUROLOOM_BACKEND_PROVIDER`
   Optional override: `lmstudio`, `ollama`, `vllm`, or `custom`.
 
@@ -60,6 +62,8 @@ pnpm dev:runner
 ```
 
 Make sure the Qwen model is available to Ollama first.
+
+NeuroLoom disables Ollama thinking by default for `qwen3.5:0.8b` live sessions. This prevents the model from spending the streamed completion budget on reasoning chunks before final answer tokens arrive. Set `NEUROLOOM_BACKEND_THINK=true` if you want to surface reasoning traces on purpose.
 
 Quick start:
 
