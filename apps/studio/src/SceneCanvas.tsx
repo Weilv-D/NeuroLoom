@@ -30,11 +30,12 @@ export function SceneCanvas({ bundle, frame, payload, selection, onSelect, live 
           far: 120,
         }}
         style={{ width: "100%", height: "100%" }}
-        gl={{ antialias: true, preserveDrawingBuffer: true }}
+        gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
         dpr={[1, 1.8]}
         onCreated={({ gl }) => {
-          gl.setClearColor("#04070d");
-          gl.toneMappingExposure = 1.08;
+          gl.setClearColor("#000000");
+          // Boosted exposure to bring out brightness and contrast
+          gl.toneMappingExposure = 1.8;
         }}
       >
         <SceneRoot

@@ -9,6 +9,7 @@ export function ScrubberBar({
   liveFollow,
   chapterIndex,
   frame,
+  isRecording,
   onStepFrame,
   onTogglePlay,
   onToggleLiveFollow,
@@ -16,6 +17,7 @@ export function ScrubberBar({
   onSetFrameIndex,
   onExportPng,
   onExportReplay,
+  onToggleRecording,
   onImportTrace,
 }: {
   bundle: TraceBundle | null;
@@ -24,6 +26,7 @@ export function ScrubberBar({
   liveFollow: boolean;
   chapterIndex: number;
   frame: TraceFrame | null;
+  isRecording: boolean;
   onStepFrame(delta: number): void;
   onTogglePlay(): void;
   onToggleLiveFollow(): void;
@@ -31,6 +34,7 @@ export function ScrubberBar({
   onSetFrameIndex(index: number): void;
   onExportPng(): void;
   onExportReplay(): void;
+  onToggleRecording(): void;
   onImportTrace(file: File): void;
 }) {
   const uploadId = useId();
@@ -53,6 +57,13 @@ export function ScrubberBar({
         </button>
         <button type="button" className="secondary-button" onClick={onExportPng}>
           Export PNG
+        </button>
+        <button
+          type="button"
+          className={`secondary-button ${isRecording ? "secondary-button--live is-recording" : ""}`}
+          onClick={onToggleRecording}
+        >
+          {isRecording ? "Stop Recording" : "Record Video"}
         </button>
         <button type="button" className="secondary-button" onClick={onExportReplay}>
           Export `.loomtrace`
@@ -85,7 +96,7 @@ export function ScrubberBar({
 
       <div className="scrubber-footer">
         <div className="range-caption">
-          <span>Space play · ←/→ step · S export</span>
+          <span>Space play · ←/→ step · S snapshot · V record video</span>
           <strong>{frame?.phase ?? "idle"}</strong>
         </div>
         <div className="chapter-actions">

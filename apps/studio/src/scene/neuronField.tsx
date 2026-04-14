@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import type { TraceBundle, TraceFrame } from "@neuroloom/core";
 import * as THREE from "three";
@@ -54,7 +54,13 @@ export function NeuronField({
     geo.setAttribute("aIndex", new THREE.BufferAttribute(indexArr, 1));
     
     // Dynamic attributes, mapped by React per frame
-    geo.setAttribute("aBaseActivation", new THREE.BufferAttribute(new Float32Array(count), 1));
+    const initialPrev = new Float32Array(count);
+    initialPrev.fill(0.015);
+    const initialTarget = new Float32Array(count);
+    initialTarget.fill(0.015);
+    
+    geo.setAttribute("aPrevActivation", new THREE.BufferAttribute(initialPrev, 1));
+    geo.setAttribute("aTargetActivation", new THREE.BufferAttribute(initialTarget, 1));
     geo.setAttribute("aIsAttn", new THREE.BufferAttribute(attnArr, 1));
     geo.setAttribute("aSelected", new THREE.BufferAttribute(new Float32Array(count), 1));
 
@@ -72,7 +78,7 @@ export function NeuronField({
 
   // Update selection buffer only when selection changes
   const selectedId = selection?.kind === "neuron" ? selection.id : null;
-  useMemo(() => {
+  useEffect(() => {
     const count = neuronIds.length;
     const selAttr = geometry.getAttribute("aSelected") as THREE.BufferAttribute;
     for (let i = 0; i < count; i++) {
@@ -81,24 +87,62 @@ export function NeuronField({
     selAttr.needsUpdate = true;
   }, [geometry, neuronIds, selectedId]);
 
+  const lerpStartRef = useRef(0);
+
   // Update base activation array ONLY when state frame changes.
   // Using direct array mutation (Float32Array) is hundreds of times faster than 86k iterations.
-  useMemo(() => {
-    const baseActAttr = geometry.getAttribute("aBaseActivation") as THREE.BufferAttribute;
-    const arr = baseActAttr.array as Float32Array;
+  useEffect(() => {
+    const targetActAttr = geometry.getAttribute("aTargetActivation") as THREE.BufferAttribute;
+    const prevActAttr = geometry.getAttribute("aPrevActivation") as THREE.BufferAttribute;
     
-    // reset to deeper baseline 
-    arr.fill(0.015);
+    const targetArr = targetActAttr.array as Float32Array;
+    const prevArr = prevActAttr.array as Float32Array;
+    
+    // Calculate EXACTLY what the GPU was displaying right before this frame update
+    // This allows us to use long fade durations (e.g. 600ms) without any sudden strobe jumps
+    // when the 160ms frame interval interrupts the lerp!
+    const now = performance.now();
+    const elapsed = now - lerpStartRef.current;
+    let factor = Math.min(elapsed / 800.0, 1.0); // Trailing comet persistence duration
+    factor = factor * factor * (3.0 - 2.0 * factor);
+    
+    const count = targetArr.length;
+    for (let i = 0; i < count; i++) {
+      // The new 'prev' becomes the perfectly smooth current visible state
+      prevArr[i] = prevArr[i]! + (targetArr[i]! - prevArr[i]!) * factor;
+    }
+    
+    // reset target to deeper baseline 
+    targetArr.fill(0.015);
 
     if (frame?.neuron_states) {
-      for (const ns of frame.neuron_states) {
-        const idx = idToIndex.get(ns.id);
-        if (idx !== undefined) {
-          arr[idx] = ns.activation;
-        }
+      const states = frame.neuron_states;
+      if (states.length === neuronIds.length) {
+         // Ultimate Fast-Path string-comparison bypass: Layout perfectly matched
+         for (let i = 0; i < count; i++) {
+           targetArr[i] = states[i]!.activation;
+         }
+      } else {
+         // Safe fallback
+         for (let i = 0; i < states.length; i++) {
+           const ns = states[i]!;
+           if (ns.id === neuronIds[i]) {
+             targetArr[i] = ns.activation;
+           } else {
+             const idx = idToIndex.get(ns.id);
+             if (idx !== undefined) {
+               targetArr[idx] = ns.activation;
+             }
+           }
+         }
       }
     }
-    baseActAttr.needsUpdate = true;
+    
+    prevActAttr.needsUpdate = true;
+    targetActAttr.needsUpdate = true;
+    
+    // reset lerp timer
+    lerpStartRef.current = now;
   }, [frame?.neuron_states, geometry, idToIndex]);
 
   const material = useMemo(
@@ -106,6 +150,7 @@ export function NeuronField({
       new THREE.ShaderMaterial({
         uniforms: {
           uTime: { value: 0.0 },
+          uLerpFactor: { value: 1.0 },
         },
         vertexShader: neuronVertexShader,
         fragmentShader: neuronFragmentShader,
@@ -119,6 +164,15 @@ export function NeuronField({
   // Per-frame update just shifts the uniform time limitlessly
   useFrame((state) => {
     material.uniforms.uTime.value = state.clock.elapsedTime;
+    
+    // CPU-synchronous persistence factor using a beautiful 800ms fade timeline
+    // This allows active neurons to remain intensely bright across MULTIPLE frames 
+    // eliminating ANY "black strobe" flashing
+    const elapsed = performance.now() - lerpStartRef.current;
+    let factor = Math.min(elapsed / 800.0, 1.0);
+    factor = factor * factor * (3.0 - 2.0 * factor);
+    
+    material.uniforms.uLerpFactor.value = factor;
   });
 
   return (

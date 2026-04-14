@@ -66,11 +66,8 @@ export function buildGraph() {
       edge(`ffn-return-${block}`, ffnId, block === qwenBlockCount - 1 ? "logits" : blockNodeId("residual", block + 1), "ffn-return", 0.88),
     );
 
-    // FFN neurons: distinct concentric rings per block around the center, forming a massive facing vortex
+    // FFN neurons: shaping into a galactic disk / flying saucer in the X-Z plane
     const ffnRng = seeded(`neurons:${block}`, 42);
-    
-    // Each block defines a new radial band of the galaxy, creating visible "rings"
-    const baseRadius = 2.0 + block * 0.65; 
 
     for (let idx = 0; idx < qwenFfnNeuronsPerBlock; idx++) {
       const neuronId = `neuron:${block}:${idx}`;
@@ -79,19 +76,23 @@ export function buildGraph() {
       const u2 = ffnRng();
       const g1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2); 
       const g2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2); 
-      const g3 = Math.sqrt(-2.0 * Math.log(Math.max(ffnRng(), 0.00001))) * Math.cos(2.0 * Math.PI * ffnRng()); 
 
-      // Distribute evenly around the ring with some swirl
+      // Galaxy saucer shape:
+      // Radius follows a Gaussian-like spread from the center. Dense core, sparse edges.
+      const coreDensity = Math.abs(g1);
+      const radius = 0.5 + coreDensity * 7.5 + (block * 0.25); // Spread ~0.5 to ~20
+      
       const angle = ffnRng() * Math.PI * 2.0;
 
-      // The rings are placed in the X-Y plane (facing the camera)
-      // We squash the Y axis slightly to give a tilted galactic perspective
-      const r = baseRadius + g1 * 0.22; // strict confinement to the ring band
-      const spreadX = Math.cos(angle) * r;
-      const spreadY = Math.sin(angle) * (r * 0.65); // Elliptical 
+      // The saucer lies in the X-Z plane
+      const spreadX = Math.cos(angle) * (radius * 1.05);
+      const spreadZ = Math.sin(angle) * (radius * 0.95);
+
+      // Y is the thickness. The core is bulging and thick, edges are razor thin
+      const bulge = Math.exp(-radius * 0.35) * 3.5; 
+      const thickness = bulge + 0.15; 
       
-      // Z handles the depth, creating a swirling 3D vortex rather than a flat pancake
-      const spreadZ = (g3 * 0.8) + (block * 0.15) - 4.0; // Pushes further blocks slightly deeper
+      const spreadY = g2 * thickness; 
       
       const pos: [number, number, number] = [
         round3(spreadX),
@@ -102,17 +103,18 @@ export function buildGraph() {
       neuronPositions[neuronId] = pos;
     }
 
-    // Attention heads: intensely glowing nodes orbiting the inner shaft
+    // Attention heads: intensely glowing nodes in the core of the saucer
     const attnRng = seeded(`attn:${block}`, 7);
     for (let head = 0; head < qwenAttnHeadsPerBlock; head++) {
       const neuronId = `attn_head:${block}:${head}`;
       
-      const angle = (head / qwenAttnHeadsPerBlock) * Math.PI * 2.0 + block * 0.5;
-      const radius = 1.6 + attnRng() * 0.8;
+      const angle = (head / qwenAttnHeadsPerBlock) * Math.PI * 2.0 + block * 0.6;
+      // Keep them close to the center to form an inner energetic engine
+      const radius = 1.0 + attnRng() * 3.0; 
       
       const hx = Math.cos(angle) * radius;
-      const hy = Math.sin(angle) * (radius * 0.65);
-      const hz = -4.0 + (block * 0.2); // Core shaft depth
+      const hz = Math.sin(angle) * radius;
+      const hy = (attnRng() - 0.5) * (Math.exp(-radius * 0.3) * 4.0); 
       
       neurons.push({ id: neuronId, block, index: head, lane: "attn_head" });
       neuronPositions[neuronId] = [round3(hx), round3(hy), round3(hz)];

@@ -16,15 +16,28 @@ import { qwenSampleTrace } from "./sampleTraces";
 import { loadTraceFromUrl } from "./traceLoader";
 import type { SelectionState } from "./types";
 
+const payloadCache = new WeakMap<TraceFrame, QwenFramePayload | null>();
+
 function getInspectPayload(bundle: TraceBundle, frame: TraceFrame): QwenFramePayload | null {
+  if (payloadCache.has(frame)) {
+    return payloadCache.get(frame)!;
+  }
   const payloadId = frame.payload_refs.find((ref) =>
     bundle.manifest.payload_catalog.find((entry) => entry.id === ref && entry.kind === "inspect"),
   );
-  if (!payloadId) return null;
+  if (!payloadId) {
+    payloadCache.set(frame, null);
+    return null;
+  }
   const raw = bundle.payloads.get(payloadId);
-  if (!raw) return null;
+  if (!raw) {
+    payloadCache.set(frame, null);
+    return null;
+  }
   const result = qwenFramePayloadSchema.safeParse(JSON.parse(raw));
-  return result.success ? result.data : null;
+  const parsed = result.success ? result.data : null;
+  payloadCache.set(frame, parsed);
+  return parsed;
 }
 
 function readLastCompletion(bundle: TraceBundle): string {
@@ -104,6 +117,7 @@ export function App() {
   useEffect(() => {
     return playback.registerKeyboardShortcuts({
       onExportPng: () => void session.exportPng(),
+      onToggleRecording: () => void session.toggleRecording(),
     });
   }, [playback, session]);
 
@@ -215,6 +229,7 @@ export function App() {
                 liveFollow={playback.liveFollow}
                 chapterIndex={chapterIndex}
                 frame={frame}
+                isRecording={session.isRecording}
                 onStepFrame={playback.stepFrame}
                 onTogglePlay={() => playback.setPlaying((c) => !c)}
                 onToggleLiveFollow={() => playback.setLiveFollow((c) => !c)}
@@ -225,6 +240,7 @@ export function App() {
                   playback.setLiveFollow(false);
                 }}
                 onExportPng={() => void session.exportPng()}
+                onToggleRecording={() => session.toggleRecording()}
                 onExportReplay={() => void session.exportReplay()}
                 onImportTrace={(f) => void session.importTrace(f)}
               />

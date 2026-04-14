@@ -85,7 +85,67 @@ export function useSession(deps: {
   const [promptDraft, setPromptDraft] = useState(defaultPrompt);
   const [activePrompt, setActivePrompt] = useState(defaultPrompt);
   const [assistantText, setAssistantText] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  
   const disconnectRef = useRef<(() => void) | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+
+  function toggleRecording() {
+    if (isRecording) {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+
+    const canvas = deps.stageRef.current?.querySelector("canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      deps.onError("The stage canvas is unavailable for video recording.");
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      // 60 FPS recording
+      stream = canvas.captureStream(60);
+    } catch {
+      deps.onError("Your browser does not support capturing the canvas stream.");
+      return;
+    }
+
+    let mimeType = "video/webm; codecs=vp9";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "video/webm";
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = "video/mp4"; // Fallback for Safari/iOS
+      }
+    }
+
+    recordedChunksRef.current = [];
+    const mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+    
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        recordedChunksRef.current.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, { type: mimeType.split(";")[0] });
+      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `neuroloom-recording-${Date.now()}.${extension}`);
+      URL.revokeObjectURL(url);
+      setIsRecording(false);
+      deps.onSetStatusLine("Video recording saved.");
+    };
+
+    mediaRecorder.start();
+    mediaRecorderRef.current = mediaRecorder;
+    setIsRecording(true);
+    deps.onSetStatusLine("Recording video... Press shortcut button again to stop.");
+  }
 
   function handleTokenStep(event: QwenTokenStepEvent) {
     startTransition(() => {
@@ -300,5 +360,7 @@ export function useSession(deps: {
     exportPng,
     exportReplay,
     openRunnerReplay,
+    isRecording,
+    toggleRecording,
   };
 }

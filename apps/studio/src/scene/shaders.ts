@@ -2,8 +2,11 @@
 
 export const neuronVertexShader = /* glsl */ `
   uniform float uTime;
+  uniform float uLerpFactor;
+  
   attribute float aIndex;
-  attribute float aBaseActivation;
+  attribute float aPrevActivation;
+  attribute float aTargetActivation;
   attribute float aIsAttn;
   attribute float aSelected;
 
@@ -12,25 +15,44 @@ export const neuronVertexShader = /* glsl */ `
   varying float vSelected;
 
   void main() {
-    float posX = position.x;
+    float posZ = position.z;
+    float posY = position.y;
+    // The saucer is in the X-Z plane, so the structural radius is from the center out
+    float planarRadius = length(position.xz);
+    float angle = atan(position.z, position.x);
     float time = uTime;
     
-    // sweeping animations computed on GPU
-    float sweepBase = sin(-posX * 0.3 + time * 3.0) * 0.5 + 0.5;
-    float sweepPulse = sin(-posX * 0.8 + time * 8.0) * 0.5 + 0.5;
+    // The "flow" moves from the dense galactic center outward through the flying saucer
+    float flowWave = planarRadius * 0.8 - time * 3.5 + abs(posY) * 0.5;
     
-    float ambientGlow = pow(sweepBase, 4.0) * 0.15;
-    float ripple = pow(sweepPulse, 32.0);
+    // sweeping animations radiating elegantly
+    float sweepBase = sin(flowWave) * 0.5 + 0.5;
     
-    float starryTwinkle = (sin(time * 2.5 + posX * 1.5 + aIndex * 0.1) * 0.5 + 0.5) * 0.08;
+    // Fast, sharp pulses shooting outward through the disc
+    float sweepPulse = sin(flowWave * 2.5 - angle * 0.5) * 0.5 + 0.5;
     
-    float act = abs(aBaseActivation);
-    float dynamicAct = act + ambientGlow + (ripple * 2.2 * max(0.12, act)) + starryTwinkle;
+    // REDUCED BASE MULTIPLIERS FOR IDLE STATE: 
+    // This stops thousands of points from summing to gray fog when they overlap
+    float ambientGlow = pow(sweepBase, 8.0) * 0.02; // Very faint structured rings
+    // RIPPLE EFFECT REMOVED/SMOOTHENED to prevent violent "strobe" bright flashes
+    float ripple = pow(sweepPulse, 4.0); // Much smoother, wider wave
     
-    // Enlarged particle sizes to make rings highly visible
-    float sizeBase = 0.024 + mod(aIndex, 8.0) * 0.008;
-    float sizeMod = pow(abs(dynamicAct), 1.4) * 0.38;
-    float finalSize = min(sizeBase + sizeMod, 0.85);
+    // Sparkle effect bound to depth to look like active data nodes
+    float starryTwinkle = (sin(time * 2.0 + posZ * 5.0 + aIndex * 0.5) * 0.5 + 0.5) * 0.01;
+    
+    // Linearly interpolate between the previous token frame and the current target token frame
+    // This utterly eliminates "stuttering" between 160ms chunks
+    float actPrev = abs(aPrevActivation);
+    float actTarget = abs(aTargetActivation);
+    float act = mix(actPrev, actTarget, uLerpFactor);
+    
+    // Ripple only gently highlights activated neurons
+    float dynamicAct = act + ambientGlow + (ripple * 0.5 * max(0.0, act - 0.05)) + starryTwinkle;
+    
+    // Smaller base particle sizes to reduce fuzzy overlapping, but intense when activated
+    float sizeBase = 0.012 + mod(aIndex, 5.0) * 0.01;
+    float sizeMod = pow(abs(dynamicAct), 1.6) * 0.4;
+    float finalSize = min(sizeBase + sizeMod, 0.95);
 
     vActivation = dynamicAct;
     vIsAttn = aIsAttn;
@@ -58,16 +80,17 @@ export const neuronFragmentShader = /* glsl */ `
     float act = abs(vActivation);
     float intensity = act * glow;
 
-    // Color mapping: True Milky Way (Deep cosmic dust, cold icy blue, brilliant golden core)
-    vec3 voidSpace = vec3(0.015, 0.04, 0.1);     // soft dark blue nebula base (not pitch black)
-    vec3 iceBlue = vec3(0.35, 0.8, 1.0);         // ambient cold blue starlight
-    vec3 whiteCore = vec3(0.96, 0.98, 1.0);      // high energy
-    vec3 warmGold  = vec3(1.0, 0.98, 0.75);      // golden/warm #fffae6 ignition
-    vec3 pureWhite = vec3(1.0, 1.0, 1.0);        // ultimate pulse clip
+    // Colors: Pure fluid energy (No washing out, deep contrast, vibrant highlights)
+    // Boosted RGB outputs to blast past the 1.0 threshold for Bloom catching
+    vec3 voidSpace = vec3(0.002, 0.005, 0.02);
+    vec3 iceBlue = vec3(0.1, 0.9, 2.5);          // Deep, ultra saturated neon blue (hdr)
+    vec3 whiteCore = vec3(0.8, 1.9, 2.2);        // Sharp, luminous cyan pulse
+    vec3 warmGold  = vec3(2.5, 1.2, 0.1);        // Molten intense orange/gold
+    vec3 pureWhite = vec3(2.5, 2.3, 2.0);        // Blinding central heat
 
-    vec3 hotPink = vec3(1.0, 0.15, 0.45);        // structural systems/heads
-    vec3 yellowCore = vec3(1.0, 0.7, 0.1);
-    vec3 selectLime = vec3(0.6, 1.0, 0.1);
+    vec3 hotPink = vec3(1.0, 0.05, 0.4);         // laser pink for attention heads
+    vec3 yellowCore = vec3(1.0, 0.85, 0.0);
+    vec3 selectLime = vec3(0.4, 1.0, 0.1);
 
     vec3 color;
     if (vSelected > 0.5) {
@@ -76,22 +99,25 @@ export const neuronFragmentShader = /* glsl */ `
       color = mix(hotPink, yellowCore, clamp(act * 1.8, 0.0, 1.0));
       color = mix(voidSpace, color, clamp(act * 4.0, 0.0, 1.0));
     } else {
-      // Very gradual transition from dark void to brilliant stars
-      color = mix(voidSpace, iceBlue, smoothstep(0.005, 0.15, act));
-      color = mix(color, whiteCore, smoothstep(0.15, 0.4, act));
+      // Much tighter transition ranges so light snaps fiercely against the dark void
+      color = mix(voidSpace, iceBlue, smoothstep(0.0, 0.2, act));
+      color = mix(color, whiteCore, smoothstep(0.2, 0.4, act));
       color = mix(color, warmGold, smoothstep(0.4, 0.8, act));
-      color = mix(color, pureWhite, smoothstep(0.8, 1.3, act)); // Explosive pulse
+      color = mix(color, pureWhite, smoothstep(0.8, 1.3, act));
     }
 
-    // Inactive dust has slightly higher alpha so the galaxy structure is visible. A pulse rapidly pushes it up
-    float baseAlpha = mix(0.22, 1.0, smoothstep(0.005, 0.4, act));
-    float alpha = baseAlpha * glow * 1.8;
+    // Adjusted base alpha to 0.18 per user request for inactive neurons.
+    float baseAlpha = mix(0.18, 1.0, smoothstep(0.01, 0.45, act));
+    
+    // Narrowing the glow curve prevents massive soft overlaps
+    float alpha = baseAlpha * pow(glow, 3.0); 
     if (vSelected > 0.5) alpha = max(alpha, 0.95);
 
     // Multiplicative glow logic to bloom the entire scene aggressively on strong pulses
-    float safeIntensity = max(intensity, 0.0001);
-    float bloomMultiplier = 1.0 + pow(max(0.0, act - 0.15), 1.3) * 8.0; // Boost global bloom for stars
+    // We increase pushing factor so active elements blast their energy out brightly
+    float bloomMultiplier = 1.0 + pow(max(0.0, act - 0.1), 1.35) * 36.0;
     
-    gl_FragColor = vec4(color * bloomMultiplier, min(alpha, 1.0));
+    // Output RGB is un-premultiplied. The alpha channel controls the blend.
+    gl_FragColor = vec4(color * bloomMultiplier, clamp(alpha, 0.0, 1.0));
   }
 `;

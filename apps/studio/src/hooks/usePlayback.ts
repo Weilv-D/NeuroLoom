@@ -53,7 +53,7 @@ export function usePlayback(bundle: TraceBundle | null) {
     onSelect(nextChapter.defaultSelection ? { kind: "node", id: nextChapter.defaultSelection } : null);
   }
 
-  function registerKeyboardShortcuts(handlers: { onExportPng: () => void }) {
+  function registerKeyboardShortcuts(handlers: { onExportPng: () => void; onToggleRecording: () => void }) {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && ["TEXTAREA", "INPUT", "BUTTON", "SELECT"].includes(target.tagName)) {
@@ -72,6 +72,9 @@ export function usePlayback(bundle: TraceBundle | null) {
       } else if (event.key.toLowerCase() === "s") {
         event.preventDefault();
         handlers.onExportPng();
+      } else if (event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        handlers.onToggleRecording();
       }
     }
 

@@ -67,19 +67,21 @@ function CameraRig({
       dampingFactor={0.06} 
       minDistance={1.0} 
       maxDistance={80.0} 
-      autoRotate={live}
+      autoRotate={false}
       autoRotateSpeed={0.5}
     />
   );
 }
 
+// NebulaField provides subtle coloring behind the stars. 
+// Values must be extremely dark to avoid creating a 'grey fog' washed out effect.
 function NebulaField() {
   return (
     <group>
       {[
-        { position: [-8, 4.5, -4], color: "#0a3a55", scale: [10, 5.5, 1.2], opacity: 0.28 },
-        { position: [2, -3.5, -3], color: "#102743", scale: [18, 8, 1.4], opacity: 0.22 },
-        { position: [12, 3.5, -5], color: "#3b2411", scale: [8, 4.5, 1], opacity: 0.16 },
+        { position: [-8, 4.5, -4], color: "#010a12", scale: [20, 10, 1.2], opacity: 0.4 },
+        { position: [2, -3.5, -3], color: "#05070a", scale: [30, 15, 1.4], opacity: 0.3 },
+        { position: [12, 3.5, -5], color: "#080402", scale: [18, 9, 1], opacity: 0.2 },
       ].map((cloud) => (
         <mesh key={cloud.position.join(":")} position={cloud.position as [number, number, number]}>
           <planeGeometry args={[cloud.scale[0], cloud.scale[1]]} />
@@ -481,25 +483,26 @@ export function SceneRoot({
   return (
     <>
       <CameraRig cameraPreset={cameraPreset} focusPosition={focusPosition} live={live} />
-      <color attach="background" args={["#04070d"]} />
-      <fog attach="fog" args={["#04070d", 14, 48]} />
-      <ambientLight intensity={0.7} color="#cfe5ff" />
-      <pointLight position={[-10, 6, 12]} intensity={2.4} color="#2fe5ff" />
-      <pointLight position={[16, -6, 9]} intensity={1.8} color="#ffb85f" />
-      <pointLight position={[0, 12, 14]} intensity={1.15} color="#d7ff63" />
-      <Stars radius={50} depth={0} count={4200} factor={6} saturation={1} fade speed={1.2} />
-      <Sparkles count={260} scale={[32, 18, 10]} size={3.8} speed={0.25} opacity={0.5} color="#1fe8ff" />
-      <NebulaField />
+      <color attach="background" args={["#000000"]} />
+      
+      <ambientLight intensity={0.2} color="#cfe5ff" />
+      <pointLight position={[-10, 6, 12]} intensity={2.0} color="#2fe5ff" />
+      <pointLight position={[16, -6, 9]} intensity={1.5} color="#ffb85f" />
+      <pointLight position={[0, 12, 14]} intensity={0.8} color="#d7ff63" />
+      <Stars radius={50} depth={0} count={2500} factor={4} saturation={0.5} fade speed={1.2} />
+      <Sparkles count={260} scale={[32, 18, 10]} size={2.5} speed={0.25} opacity={0.3} color="#1fe8ff" />
+      
 
       {/* Pure, textless natural fluid starfield. Rigid UI paths and anchors removed. */}
       <NeuronField graph={bundle.graph} frame={frame} selection={selection} onSelect={onSelect} live={live} />
 
       {focusPosition ? <SelectionHalo position={vectorToTuple(focusPosition)} /> : null}
       <EffectComposer>
-        <Bloom luminanceThreshold={0.02} intensity={2.1} mipmapBlur />
-        <Noise opacity={0.025} />
-        <ChromaticAberration offset={[0.0012, 0.0016] as [number, number]} />
-        <Vignette offset={0.24} darkness={0.75} />
+        {/* Aggressive Bloom values for HDR feeling and glowing plasma flow */}
+        <Bloom luminanceThreshold={0.35} luminanceSmoothing={0.2} intensity={4.5} mipmapBlur />
+        <Noise opacity={0.015} />
+        <ChromaticAberration offset={[0.001, 0.0012] as [number, number]} />
+        <Vignette offset={0.3} darkness={0.8} />
       </EffectComposer>
     </>
   );
