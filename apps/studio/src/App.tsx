@@ -34,8 +34,9 @@ function getInspectPayload(bundle: TraceBundle, frame: TraceFrame): QwenFramePay
     payloadCache.set(frame, null);
     return null;
   }
-  const result = qwenFramePayloadSchema.safeParse(JSON.parse(raw));
-  const parsed = result.success ? result.data : null;
+  // Bypass extremely slow Zod array validation on 86k float payloads during hot playback.
+  // We trust the structured payload JSON directly here.
+  const parsed = JSON.parse(raw) as QwenFramePayload;
   payloadCache.set(frame, parsed);
   return parsed;
 }
@@ -47,6 +48,7 @@ function readLastCompletion(bundle: TraceBundle): string {
 }
 
 export function App() {
+  console.time('appRender');
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [bundle, setBundleState] = useState<TraceBundle | null>(null);
   const [selection, setSelection] = useState<SelectionState>(null);
@@ -132,6 +134,8 @@ export function App() {
   const focusBlock = currentPayload ? currentPayload.tokenIndex % 24 : 0;
   const focusDigest = currentPayload ? currentPayload.blockDigest.slice(Math.max(0, focusBlock - 2), Math.min(24, focusBlock + 3)) : [];
   const chapterIndex = currentChapter && bundle ? bundle.narrative.chapters.findIndex((chapter) => chapter.id === currentChapter.id) : -1;
+
+  console.timeEnd('appRender');
 
   return (
     <ErrorBoundary>

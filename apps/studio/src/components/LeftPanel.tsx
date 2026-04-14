@@ -205,8 +205,9 @@ export function LeftPanel({
         </div>
         <div className="token-cloud">
           {currentTokenWindow.length === 0 ? <span className="empty-state">Waiting for token flow.</span> : null}
-          {currentTokenWindow.map((token, index) => {
-            const absoluteIndex = (currentPayload?.tokenIndex ?? 0) - currentTokenWindow.length + index + 1;
+          {currentTokenWindow.length > 150 ? <span className="token-pill empty-state">...</span> : null}
+          {currentTokenWindow.slice(-150).map((token, mappedIndex) => {
+            const absoluteIndex = (currentPayload?.tokenIndex ?? 0) - Math.min(currentTokenWindow.length, 150) + mappedIndex + 1;
             const tokenId = `token-${absoluteIndex}`;
             const isActive = selection?.kind === "token" && selection.id === tokenId;
             return (
