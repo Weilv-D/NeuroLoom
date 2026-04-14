@@ -47,8 +47,8 @@
 
   <!-- Title / Branding -->
   <text x="50" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="800" fill="#ffffff" letter-spacing="1">NeuroLoom</text>
-  <rect x="220" y="36" width="76" height="18" rx="9" fill="url(#glowAccent)" opacity="0.9"/>
-  <text x="258" y="49" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="1">WORKFLOW</text>
+  <rect x="220" y="36" width="100" height="18" rx="9" fill="url(#glowAccent)" opacity="0.9"/>
+  <text x="270" y="49" font-family="system-ui, -apple-system, sans-serif" font-size="9" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="1">ARCHITECTURE</text>
 
   <!-- Connective Paths -->
   <!-- Main flow paths with glowing animation dots -->
@@ -65,46 +65,45 @@
       <rect width="220" height="200" rx="20" fill="url(#glass)" stroke="rgba(255,255,255,0.1)" stroke-width="1" filter="url(#glassShadow)"/>
       <rect width="220" height="4" fill="url(#glowAccent)" opacity="0.6" style="mix-blend-mode: overlay;" />
       
-      <!-- Better Model Icon -->
+      <!-- Python / PyTorch Capture Icon -->
       <circle cx="110" cy="80" r="40" fill="none" stroke="rgba(59,130,246,0.3)" stroke-width="2" />
-      <path d="M96 68 L126 68 L111 94 Z" fill="none" stroke="url(#glowAccent)" stroke-width="2.5" stroke-linejoin="round" />
-      <circle cx="111" cy="94" r="3" fill="#ec4899" filter="url(#neonGlow)"/>
-      <circle cx="96" cy="68" r="3" fill="#3b82f6" filter="url(#neonGlow)"/>
-      <circle cx="126" cy="68" r="3" fill="#8b5cf6" filter="url(#neonGlow)"/>
+      <path d="M90 70 Q 110 50 130 70 M 90 90 Q 110 110 130 90" fill="none" stroke="url(#glowAccent)" stroke-width="2.5" stroke-linecap="round" />
+      <circle cx="110" cy="80" r="5" fill="#ec4899" filter="url(#neonGlow)"/>
+      <circle cx="90" cy="70" r="3" fill="#3b82f6" filter="url(#neonGlow)"/>
+      <circle cx="130" cy="90" r="3" fill="#8b5cf6" filter="url(#neonGlow)"/>
       
-      <text x="110" y="150" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">Model Training</text>
-      <text x="110" y="170" text-anchor="middle" font-size="12" fill="#94a3b8">PyTorch / Export ONNX</text>
+      <text x="110" y="145" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">Data &amp; Trace Capture</text>
+      <text x="110" y="165" text-anchor="middle" font-size="11" fill="#94a3b8">PyTorch Hooks / Python</text>
+      <text x="110" y="180" text-anchor="middle" font-size="11" fill="#94a3b8">official-traces (Live/Qwen)</text>
     </g>
 
-    <!-- Stage 2: Loomtrace Engine -->
-    <g transform="translate(350, 100)">
-      <rect width="280" height="200" rx="20" fill="url(#glass)" stroke="rgba(255,255,255,0.15)" stroke-width="1" filter="url(#glassShadow)"/>
+    <!-- Stage 2: Loomtrace Engine / Runner -->
+    <g transform="translate(330, 100)">
+      <rect width="300" height="200" rx="20" fill="url(#glass)" stroke="rgba(255,255,255,0.15)" stroke-width="1" filter="url(#glassShadow)"/>
       
-      <!-- Internal Nodes representing MLP/CNN -->
-      <g transform="translate(60, 60)">
+      <!-- Internal Nodes representing Runner & Core -->
+      <g transform="translate(70, 60)">
         <circle cx="0" cy="-20" r="8" fill="#ec4899" filter="url(#neonGlow)"/>
         <circle cx="0" cy="20" r="8" fill="#ec4899" filter="url(#neonGlow)"/>
-        <circle cx="60" cy="-30" r="8" fill="#8b5cf6" filter="url(#neonGlow)"/>
-        <circle cx="60" cy="0" r="8" fill="#8b5cf6" filter="url(#neonGlow)"/>
-        <circle cx="60" cy="30" r="8" fill="#8b5cf6" filter="url(#neonGlow)"/>
-        <circle cx="120" cy="0" r="8" fill="#3b82f6" filter="url(#neonGlow)"/>
+        <circle cx="80" cy="-20" r="8" fill="#8b5cf6" filter="url(#neonGlow)"/>
+        <circle cx="80" cy="20" r="8" fill="#8b5cf6" filter="url(#neonGlow)"/>
+        <circle cx="160" cy="0" r="8" fill="#3b82f6" filter="url(#neonGlow)"/>
         
-        <path d="M 8 -20 L 52 -30 M 8 -20 L 52 0 M 8 -20 L 52 30" stroke="rgba(255,255,255,0.1)" stroke-width="2" />
-        <path d="M 8 20 L 52 -30 M 8 20 L 52 0 M 8 20 L 52 30" stroke="rgba(255,255,255,0.1)" stroke-width="2" />
-        <path d="M 68 -30 L 112 0 M 68 0 L 112 0 M 68 30 L 112 0" stroke="rgba(255,255,255,0.1)" stroke-width="2" />
+        <path d="M 8 -20 L 72 -20 M 8 20 L 72 20 M 8 -20 L 72 20 M 8 20 L 72 -20" stroke="rgba(255,255,255,0.1)" stroke-width="2" />
+        <path d="M 88 -20 L 152 -3 L 88 20" stroke="rgba(255,255,255,0.1)" stroke-width="2" fill="none" />
       </g>
       
-      <text x="140" y="150" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">.loomtrace Engine</text>
-      <text x="140" y="170" text-anchor="middle" font-size="12" fill="#94a3b8">Deterministic Topology &amp; Timeline</text>
+      <text x="150" y="145" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">Runner Server &amp; Core</text>
+      <text x="150" y="165" text-anchor="middle" font-size="11" fill="#94a3b8">Node.js SSE Proxy &amp; WebSocket Connect</text>
+      <text x="150" y="180" text-anchor="middle" font-size="11" fill="#94a3b8">Zod Auth / .loomtrace Validations</text>
     </g>
 
     <!-- Stage 3: Studio / R3F -->
-    <g transform="translate(700, 100)">
-      <rect width="240" height="200" rx="20" fill="url(#glass)" stroke="url(#glowAccent)" stroke-width="1" filter="url(#glassShadow)"/>
+    <g transform="translate(680, 100)">
+      <rect width="260" height="200" rx="20" fill="url(#glass)" stroke="url(#glowAccent)" stroke-width="1" filter="url(#glassShadow)"/>
       
       <!-- Minimal Perspective Grid / Camera representation -->
-      <g transform="translate(120, 80) scale(1.1)">
-        <!-- Beautiful floating nodes / perspective elements instead of stacked diamonds -->
+      <g transform="translate(130, 80) scale(1.1)">
         <!-- Center glowing core -->
         <circle cx="0" cy="0" r="16" fill="url(#glowAccent)" filter="url(#neonGlow)"/>
         <circle cx="0" cy="0" r="10" fill="#ffffff" opacity="0.9"/>
@@ -122,18 +121,23 @@
         <polygon points="0,-40 34,-20 34,20 0,40 -34,20 -34,-20" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
       </g>
       
-      <text x="120" y="150" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">2.5D Cinematic Studio</text>
-      <text x="120" y="170" text-anchor="middle" font-size="12" fill="#94a3b8">WebGPU / React Three Fiber</text>
+      <text x="130" y="145" text-anchor="middle" font-size="16" font-weight="600" fill="#f8fafc">2.5D Cinematic Studio</text>
+      <text x="130" y="165" text-anchor="middle" font-size="11" fill="#94a3b8">React 19 / R3F / 86k Neuron Field</text>
+      <text x="130" y="180" text-anchor="middle" font-size="11" fill="#94a3b8">Live Rendering / Trace Replay</text>
     </g>
   </g>
   
   <!-- Additional Tech Badges -->
-  <g transform="translate(740, 340)">
+  <g transform="translate(680, 340)">
+    <rect width="60" height="24" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)"/>
+    <text x="30" y="16" font-family="system-ui" font-size="10" font-weight="600" fill="#94a3b8" text-anchor="middle">React</text>
+  </g>
+  <g transform="translate(750, 340)">
     <rect width="70" height="24" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)"/>
     <text x="35" y="16" font-family="system-ui" font-size="10" font-weight="600" fill="#94a3b8" text-anchor="middle">Three.js</text>
   </g>
-  <g transform="translate(820, 340)">
-    <rect width="70" height="24" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)"/>
-    <text x="35" y="16" font-family="system-ui" font-size="10" font-weight="600" fill="#94a3b8" text-anchor="middle">WebGL</text>
+  <g transform="translate(830, 340)">
+    <rect width="80" height="24" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)"/>
+    <text x="40" y="16" font-family="system-ui" font-size="10" font-weight="600" fill="#94a3b8" text-anchor="middle">WebSocket</text>
   </g>
 </svg>
