@@ -107,9 +107,14 @@ export function NeuronField({
     factor = factor * factor * (3.0 - 2.0 * factor);
     
     const count = targetArr.length;
+    // Asymmetric light-up vs decay factors in math
+    const lightUpFactor = Math.min(factor * 6.0, 1.0);
+    const decayFactor = factor;
     for (let i = 0; i < count; i++) {
       // The new 'prev' becomes the perfectly smooth current visible state
-      prevArr[i] = prevArr[i]! + (targetArr[i]! - prevArr[i]!) * factor;
+      const isUp = targetArr[i]! > prevArr[i]!;
+      const f = isUp ? lightUpFactor : decayFactor;
+      prevArr[i] = prevArr[i]! + (targetArr[i]! - prevArr[i]!) * f;
     }
     
     // reset target to deeper baseline 

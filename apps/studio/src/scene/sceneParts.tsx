@@ -34,22 +34,44 @@ function CameraRig({
 }) {
   const { camera } = useThree();
   const orbitRef = useRef<any>(null);
+  
+  // Track when a new preset anchor kicks in
+  const presetIdRef = useRef(cameraPreset.id);
+  const transitionStartRef = useRef(0);
 
   const target = useMemo(
     () => new THREE.Vector3(cameraPreset.target.x, cameraPreset.target.y, cameraPreset.target.z),
     [cameraPreset.target],
   );
   
+  const cameraDest = useMemo(
+    () => new THREE.Vector3(cameraPreset.position.x, cameraPreset.position.y, cameraPreset.position.z),
+    [cameraPreset.position],
+  );
+
   const focusTarget = useMemo(
     () => (focusPosition ? new THREE.Vector3(focusPosition.x, focusPosition.y, focusPosition.z) : null),
     [focusPosition],
   );
 
+  if (presetIdRef.current !== cameraPreset.id) {
+    presetIdRef.current = cameraPreset.id;
+    transitionStartRef.current = performance.now();
+  }
+
   useFrame((state) => {
+    const elapsed = performance.now() - transitionStartRef.current;
+    // 2500ms cinematic pan window when camera anchors change
+    if (elapsed < 2500) {
+      state.camera.position.lerp(cameraDest, 0.035);
+    }
+
     if (orbitRef.current) {
       if (focusTarget) {
         // Smoothly pan camera target to the focused element
         orbitRef.current.target.lerp(focusTarget, 0.08);
+      } else if (elapsed < 2500) {
+        orbitRef.current.target.lerp(target, 0.04);
       }
       
       // We can also let the camera gently drift naturally if live and not interacted

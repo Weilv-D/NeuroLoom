@@ -40,11 +40,19 @@ export const neuronVertexShader = /* glsl */ `
     // Sparkle effect bound to depth to look like active data nodes
     float starryTwinkle = (sin(time * 2.0 + posZ * 5.0 + aIndex * 0.5) * 0.5 + 0.5) * 0.01;
     
-    // Linearly interpolate between the previous token frame and the current target token frame
-    // This utterly eliminates "stuttering" between 160ms chunks
+    // Asymmetric interpolation: 
+    // Neurons light up extremely fast (within 160ms / 0.2 factor) to respond sharply to tokens,
+    // but they decay slowly (800ms base factor) to leave gorgeous data trails!
     float actPrev = abs(aPrevActivation);
     float actTarget = abs(aTargetActivation);
-    float act = mix(actPrev, actTarget, uLerpFactor);
+    
+    // Speed multiplier: 5.0 means it lights up 5x faster than it decays
+    float lightUpFactor = min(uLerpFactor * 6.0, 1.0);
+    float decayFactor = uLerpFactor;
+    
+    float act = actTarget > actPrev 
+      ? mix(actPrev, actTarget, lightUpFactor)
+      : mix(actPrev, actTarget, decayFactor);
     
     // Ripple only gently highlights activated neurons
     float dynamicAct = act + ambientGlow + (ripple * 0.5 * max(0.0, act - 0.05)) + starryTwinkle;
