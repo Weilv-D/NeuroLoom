@@ -43,6 +43,13 @@ pnpm validate:samples
 - `tools/runner`
   Local API and WebSocket server for live sessions.
 
+The runner supports two live sources:
+
+- `synthetic`
+  Immediate local demo mode.
+- `adapter`
+  OpenAI-compatible backend bridge, with SSE streaming enabled by default.
+
 ## Boundary
 
 - One model: `Qwen/Qwen3.5-0.8B`

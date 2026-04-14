@@ -50,6 +50,14 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
+    async function refreshRunnerHealth() {
+      const health = await checkRunnerHealth();
+      if (!cancelled) {
+        setRunnerHealth(health);
+        setRunnerChecked(true);
+      }
+    }
+
     async function boot() {
       setLoadingLabel("Loading the official Qwen replay…");
       try {
@@ -69,18 +77,17 @@ export function App() {
           setLoadingLabel(null);
         }
       }
-
-      const health = await checkRunnerHealth();
-      if (!cancelled) {
-        setRunnerHealth(health);
-        setRunnerChecked(true);
-      }
+      await refreshRunnerHealth();
     }
 
     void boot();
+    const healthInterval = window.setInterval(() => {
+      void refreshRunnerHealth();
+    }, 10_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(healthInterval);
       disconnectRef.current?.();
     };
   }, []);
@@ -364,16 +371,39 @@ export function App() {
                 <button type="button" className="secondary-button" onClick={() => void loadSampleReplay()}>
                   Load Demo Replay
                 </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={async () => {
+                    const health = await checkRunnerHealth();
+                    setRunnerHealth(health);
+                    setRunnerChecked(true);
+                  }}
+                >
+                  Refresh Runner
+                </button>
               </div>
             </form>
             <div className="status-list">
               <div>
                 <span>Transport</span>
-                <strong>{runnerHealth ? `local runner · ${runnerHealth.mode}` : "replay fallback"}</strong>
+                <strong>
+                  {runnerHealth
+                    ? `local runner · ${runnerHealth.mode}${runnerHealth.streaming ? " · streaming" : " · buffered"}`
+                    : "replay fallback"}
+                </strong>
               </div>
               <div>
                 <span>Model</span>
                 <strong>{runnerHealth?.model ?? qwenSampleTrace.model}</strong>
+              </div>
+              <div>
+                <span>Backend</span>
+                <strong>{runnerHealth?.backendModel ?? "fallback replay only"}</strong>
+              </div>
+              <div>
+                <span>Target</span>
+                <strong>{runnerHealth?.backendUrl ?? "local synthetic runner"}</strong>
               </div>
               <div>
                 <span>Status</span>

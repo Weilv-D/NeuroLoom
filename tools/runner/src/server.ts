@@ -29,12 +29,14 @@ type SessionRecord = {
   archive: Uint8Array | null;
   status: "booting" | "live" | "complete" | "error";
   error: string | null;
+  completion: string;
 };
 
 const runnerPort = Number(process.env.NEUROLOOM_RUNNER_PORT ?? "7778");
 const backendUrl = process.env.NEUROLOOM_BACKEND_URL?.trim() ?? "";
 const backendApiKey = process.env.NEUROLOOM_BACKEND_API_KEY?.trim() ?? process.env.OPENAI_API_KEY?.trim() ?? "";
 const backendModel = process.env.NEUROLOOM_BACKEND_MODEL?.trim() ?? qwenRunnerModelId;
+const backendStreamingRequested = process.env.NEUROLOOM_BACKEND_STREAM?.trim() !== "false";
 const mode: RunnerMode = backendUrl ? "adapter" : "synthetic";
 
 const sessions = new Map<string, SessionRecord>();
@@ -107,6 +109,9 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       mode,
       model: qwenRunnerModelId,
       backendModel: backendModel,
+      streaming: Boolean(backendUrl) && backendStreamingRequested,
+      backendUrl: backendUrl || null,
+      sessions: sessions.size,
       liveEndpoint: `/live/:sessionId`,
     });
     return;
@@ -131,6 +136,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       archive: null,
       status: "booting",
       error: null,
+      completion: "",
     };
     sessions.set(sessionId, session);
 
@@ -194,6 +200,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
       status: session.status,
       error: session.error,
       events: session.events.length,
+      completion: session.completion,
       archiveReady: Boolean(session.archive),
     });
     return;
@@ -204,46 +211,127 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
 
 async function runSession(session: SessionRecord, request: ChatCompletionRequest) {
   try {
-    const completionText = await resolveCompletionText(session.prompt, request);
-    const tokens = tokenizeCompletion(completionText);
-
-    for (const token of tokens) {
-      await sleep(stepDelay(token));
-      const event = session.recorder.pushToken(token);
-      session.events.push(event);
-      broadcastEvent(session, event);
+    if (!backendUrl) {
+      const completionText = buildSyntheticQwenResponse(session.prompt);
+      await emitCompletionAsTokens(session, completionText, true);
+      return;
     }
 
-    const completed = session.recorder.complete();
-    session.events.push(completed);
-    session.archive = await createLoomTraceArchive(session.recorder.exportBundle());
-    session.status = "complete";
-    broadcastEvent(session, completed);
+    if (backendStreamingRequested) {
+      const completionText = await streamBackendCompletion(session, request);
+      if (!completionText.trim()) {
+        throw new Error("Streaming adapter produced an empty completion.");
+      }
+      if (session.status !== "complete") {
+        await finishSession(session);
+      }
+      return;
+    }
+
+    const completionText = await resolveBufferedCompletionText(session.prompt, request);
+    await emitCompletionAsTokens(session, completionText, false);
   } catch (error) {
     session.status = "error";
     session.error = (error as Error).message;
     const fallbackText = buildSyntheticQwenResponse(session.prompt);
-    const tokens = tokenizeCompletion(fallbackText);
-    for (const token of tokens) {
-      await sleep(stepDelay(token));
-      const event = session.recorder.pushToken(token);
-      session.events.push(event);
-      broadcastEvent(session, event);
-    }
-    const completed = session.recorder.complete();
-    session.events.push(completed);
-    session.archive = await createLoomTraceArchive(session.recorder.exportBundle());
-    session.status = "complete";
-    broadcastEvent(session, completed);
+    await emitCompletionAsTokens(session, fallbackText, true);
   }
 }
 
-async function resolveCompletionText(prompt: string, request: ChatCompletionRequest) {
-  if (!backendUrl) {
-    return buildSyntheticQwenResponse(prompt);
+async function emitCompletionAsTokens(session: SessionRecord, completionText: string, syntheticDelay: boolean) {
+  session.completion = completionText;
+  const tokens = tokenizeCompletion(completionText);
+  for (const token of tokens) {
+    if (syntheticDelay) {
+      await sleep(stepDelay(token));
+    }
+    const event = session.recorder.pushToken(token);
+    session.events.push(event);
+    broadcastEvent(session, event);
+  }
+  await finishSession(session);
+}
+
+async function finishSession(session: SessionRecord) {
+  const completed = session.recorder.complete();
+  session.events.push(completed);
+  session.archive = await createLoomTraceArchive(session.recorder.exportBundle());
+  session.status = "complete";
+  broadcastEvent(session, completed);
+}
+
+async function streamBackendCompletion(session: SessionRecord, request: ChatCompletionRequest) {
+  const response = await fetch(resolveBackendEndpoint(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(backendApiKey ? { Authorization: `Bearer ${backendApiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: request.model ?? backendModel,
+      messages: request.messages,
+      max_tokens: request.max_tokens ?? 160,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Adapter backend failed: ${response.status} ${response.statusText}`);
   }
 
-  const endpoint = backendUrl.endsWith("/chat/completions") ? backendUrl : `${backendUrl.replace(/\/$/, "")}/v1/chat/completions`;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream") || !response.body) {
+    const buffered = await extractBufferedCompletionFromResponse(response);
+    await emitCompletionAsTokens(session, buffered, false);
+    return buffered;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completion = "";
+  let emittedTokenCount = 0;
+  let isDone = false;
+
+  while (!isDone) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true }).replace(/\r/g, "");
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+
+    for (const rawEvent of events) {
+      const parsed = parseSseEvent(rawEvent);
+      if (!parsed) continue;
+      if (parsed.done) {
+        isDone = true;
+        break;
+      }
+      if (!parsed.content) continue;
+      completion += parsed.content;
+      session.completion = completion;
+      emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseSseEvent(buffer);
+    if (parsed?.content) {
+      completion += parsed.content;
+      session.completion = completion;
+      emittedTokenCount = emitFreshTokens(session, completion, emittedTokenCount);
+    }
+  }
+
+  emitFreshTokens(session, completion, emittedTokenCount, true);
+  session.completion = completion;
+  return completion;
+}
+
+async function resolveBufferedCompletionText(_prompt: string, request: ChatCompletionRequest) {
+  const endpoint = resolveBackendEndpoint();
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -261,23 +349,7 @@ async function resolveCompletionText(prompt: string, request: ChatCompletionRequ
   if (!response.ok) {
     throw new Error(`Adapter backend failed: ${response.status} ${response.statusText}`);
   }
-  const json = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-  };
-  const content = json.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    const joined = content
-      .map((part) => part.text ?? "")
-      .join("")
-      .trim();
-    if (joined) {
-      return joined;
-    }
-  }
-  throw new Error("Adapter backend returned an empty completion.");
+  return extractBufferedCompletionFromResponse(response);
 }
 
 function extractPrompt(messages: ChatCompletionRequest["messages"]) {
@@ -303,6 +375,86 @@ function broadcastEvent(session: SessionRecord, event: QwenLiveEvent) {
       socket.send(payload);
     }
   }
+}
+
+function resolveBackendEndpoint() {
+  return backendUrl.endsWith("/chat/completions") ? backendUrl : `${backendUrl.replace(/\/$/, "")}/v1/chat/completions`;
+}
+
+async function extractBufferedCompletionFromResponse(response: Response) {
+  const json = (await response.json()) as {
+    choices?: Array<{
+      delta?: { content?: string | Array<{ text?: string; type?: string }> };
+      message?: { content?: string | Array<{ text?: string; type?: string }> };
+    }>;
+  };
+  const choice = json.choices?.[0];
+  const content = choice?.message?.content ?? choice?.delta?.content;
+  const extracted = extractContentString(content);
+  if (extracted.trim()) {
+    return extracted;
+  }
+  throw new Error("Adapter backend returned an empty completion.");
+}
+
+function parseSseEvent(rawEvent: string) {
+  const data = rawEvent
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data) {
+    return null;
+  }
+  if (data === "[DONE]") {
+    return { done: true, content: "" };
+  }
+  const json = JSON.parse(data) as {
+    choices?: Array<{
+      delta?: { content?: string | Array<{ text?: string; type?: string }> };
+      message?: { content?: string | Array<{ text?: string; type?: string }> };
+      finish_reason?: string | null;
+    }>;
+  };
+  const choice = json.choices?.[0];
+  return {
+    done: choice?.finish_reason === "stop",
+    content: extractContentString(choice?.delta?.content ?? choice?.message?.content),
+  };
+}
+
+function extractContentString(content: string | Array<{ text?: string; type?: string }> | undefined) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => part.text ?? "")
+      .join("");
+  }
+  return "";
+}
+
+function emitFreshTokens(session: SessionRecord, completion: string, emittedTokenCount: number, flushLast = false) {
+  const nextTokens = tokenizeCompletion(completion);
+  const readyCount = flushLast ? nextTokens.length : completedTokenCount(completion, nextTokens.length);
+  for (let index = emittedTokenCount; index < readyCount; index++) {
+    const token = nextTokens[index];
+    if (!token) continue;
+    const event = session.recorder.pushToken(token);
+    session.events.push(event);
+    broadcastEvent(session, event);
+  }
+  return readyCount;
+}
+
+function completedTokenCount(completion: string, tokenCount: number) {
+  const trailing = completion.at(-1) ?? "";
+  if (!trailing || /\s/.test(trailing) || /[.,!?;:)\]"'`]/.test(trailing)) {
+    return tokenCount;
+  }
+  return Math.max(0, tokenCount - 1);
 }
 
 async function readJsonBody(request: IncomingMessage) {

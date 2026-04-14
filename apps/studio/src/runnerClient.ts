@@ -8,6 +8,9 @@ export type RunnerHealth = {
   mode: "synthetic" | "adapter";
   model: string;
   backendModel: string;
+  streaming: boolean;
+  backendUrl: string | null;
+  sessions: number;
   liveEndpoint: string;
 };
 

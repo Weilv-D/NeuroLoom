@@ -81,12 +81,15 @@ Endpoints:
 
 By default the runner uses a deterministic synthetic text source so the stage works immediately. If you provide an OpenAI-compatible backend, the runner can adapt a real text completion endpoint while still emitting NeuroLoom-specific live events.
 
+When `NEUROLOOM_BACKEND_URL` is set, the runner now prefers `stream: true` and bridges SSE token deltas into NeuroLoom `token_step` events in real time. Set `NEUROLOOM_BACKEND_STREAM=false` to force buffered adapter mode.
+
 Environment variables:
 
 - `NEUROLOOM_RUNNER_PORT`
 - `NEUROLOOM_BACKEND_URL`
 - `NEUROLOOM_BACKEND_API_KEY`
 - `NEUROLOOM_BACKEND_MODEL`
+- `NEUROLOOM_BACKEND_STREAM`
 
 ## `.loomtrace`
 
