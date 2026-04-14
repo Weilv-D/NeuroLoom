@@ -66,60 +66,53 @@ export function buildGraph() {
       edge(`ffn-return-${block}`, ffnId, block === qwenBlockCount - 1 ? "logits" : blockNodeId("residual", block + 1), "ffn-return", 0.88),
     );
 
-    // FFN neurons: natural Gaussian ring (Torus) galaxy transitioning smoothly into sparse space
+    // FFN neurons: distinct concentric rings per block around the center, forming a massive facing vortex
     const ffnRng = seeded(`neurons:${block}`, 42);
-    const ffnCenterX = x + 0.05;
-    const ffnCenterY = Math.sin(block * 0.2) * 0.2;
     
+    // Each block defines a new radial band of the galaxy, creating visible "rings"
+    const baseRadius = 2.0 + block * 0.65; 
+
     for (let idx = 0; idx < qwenFfnNeuronsPerBlock; idx++) {
       const neuronId = `neuron:${block}:${idx}`;
       
-      // Box-Muller transform for natural Gaussian distribution (no harsh square edges)
       const u1 = Math.max(ffnRng(), 0.00001);
       const u2 = ffnRng();
-      const g1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2); // Gaussian X
-      const g2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2); // Gaussian Y
-      const g3 = Math.sqrt(-2.0 * Math.log(Math.max(ffnRng(), 0.00001))) * Math.cos(2.0 * Math.PI * ffnRng()); // Gaussian Z
+      const g1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2); 
+      const g2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2); 
+      const g3 = Math.sqrt(-2.0 * Math.log(Math.max(ffnRng(), 0.00001))) * Math.cos(2.0 * Math.PI * ffnRng()); 
 
-      // Create a majestic elliptical ring
-      // ringRadius pulls the dense core out from the absolute center, creating a visible "hole" or "ring"
-      const ringRadius = 2.8; 
-      
-      // angle around the Z-Y plane (the face of the ring)
+      // Distribute evenly around the ring with some swirl
       const angle = ffnRng() * Math.PI * 2.0;
 
-      // X jitter using pure Gaussian so blocks merge organically without looking like stacked boxes
-      const xJitter = g1 * 0.65;
+      // The rings are placed in the X-Y plane (facing the camera)
+      // We squash the Y axis slightly to give a tilted galactic perspective
+      const r = baseRadius + g1 * 0.22; // strict confinement to the ring band
+      const spreadX = Math.cos(angle) * r;
+      const spreadY = Math.sin(angle) * (r * 0.65); // Elliptical 
       
-      // Thickness of the ring spreads out naturally using Gaussian noise
-      // Squashed Y creates an elliptical/galactic disk orientation
-      const ySpread = g2 * 0.45;
-      const zSpread = g3 * 1.5;
-      
-      const ny = Math.sin(angle) * ringRadius * 0.35 + ySpread;
-      const nz = Math.cos(angle) * ringRadius * 1.0 + zSpread;
+      // Z handles the depth, creating a swirling 3D vortex rather than a flat pancake
+      const spreadZ = (g3 * 0.8) + (block * 0.15) - 4.0; // Pushes further blocks slightly deeper
       
       const pos: [number, number, number] = [
-        round3(ffnCenterX + xJitter),
-        round3(ffnCenterY + ny),
-        round3(nz)
+        round3(spreadX),
+        round3(spreadY),
+        round3(spreadZ)
       ];
       neurons.push({ id: neuronId, block, index: idx, lane: "ffn" });
       neuronPositions[neuronId] = pos;
     }
 
-    // Attention heads: glowing orbital nodes around the ring
+    // Attention heads: intensely glowing nodes orbiting the inner shaft
     const attnRng = seeded(`attn:${block}`, 7);
     for (let head = 0; head < qwenAttnHeadsPerBlock; head++) {
       const neuronId = `attn_head:${block}:${head}`;
       
       const angle = (head / qwenAttnHeadsPerBlock) * Math.PI * 2.0 + block * 0.5;
-      const radius = 4.5 + attnRng() * 1.5;
-      const xJitter = (attnRng() - 0.5) * 1.2;
+      const radius = 1.6 + attnRng() * 0.8;
       
-      const hx = ffnCenterX + xJitter;
-      const hy = ffnCenterY + radius * Math.sin(angle) * 0.45;
-      const hz = radius * Math.cos(angle) * 1.2;
+      const hx = Math.cos(angle) * radius;
+      const hy = Math.sin(angle) * (radius * 0.65);
+      const hz = -4.0 + (block * 0.2); // Core shaft depth
       
       neurons.push({ id: neuronId, block, index: head, lane: "attn_head" });
       neuronPositions[neuronId] = [round3(hx), round3(hy), round3(hz)];

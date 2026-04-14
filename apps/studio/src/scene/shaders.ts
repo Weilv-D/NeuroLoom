@@ -27,9 +27,10 @@ export const neuronVertexShader = /* glsl */ `
     float act = abs(aBaseActivation);
     float dynamicAct = act + ambientGlow + (ripple * 2.2 * max(0.12, act)) + starryTwinkle;
     
-    float sizeBase = 0.012 + mod(aIndex, 8.0) * 0.005;
-    float sizeMod = pow(abs(dynamicAct), 1.5) * 0.28;
-    float finalSize = min(sizeBase + sizeMod, 0.65);
+    // Enlarged particle sizes to make rings highly visible
+    float sizeBase = 0.024 + mod(aIndex, 8.0) * 0.008;
+    float sizeMod = pow(abs(dynamicAct), 1.4) * 0.38;
+    float finalSize = min(sizeBase + sizeMod, 0.85);
 
     vActivation = dynamicAct;
     vIsAttn = aIsAttn;
@@ -82,14 +83,14 @@ export const neuronFragmentShader = /* glsl */ `
       color = mix(color, pureWhite, smoothstep(0.8, 1.3, act)); // Explosive pulse
     }
 
-    // Inactive dust has 12% alpha so the galaxy structure is visible. A pulse/activation rapidly pushes it up
-    float baseAlpha = mix(0.12, 1.0, smoothstep(0.005, 0.4, act));
+    // Inactive dust has slightly higher alpha so the galaxy structure is visible. A pulse rapidly pushes it up
+    float baseAlpha = mix(0.22, 1.0, smoothstep(0.005, 0.4, act));
     float alpha = baseAlpha * glow * 1.8;
-    if (vSelected > 0.5) alpha = max(alpha, 0.85);
+    if (vSelected > 0.5) alpha = max(alpha, 0.95);
 
     // Multiplicative glow logic to bloom the entire scene aggressively on strong pulses
     float safeIntensity = max(intensity, 0.0001);
-    float bloomMultiplier = 1.0 + pow(max(0.0, act - 0.2), 1.5) * 6.0; 
+    float bloomMultiplier = 1.0 + pow(max(0.0, act - 0.15), 1.3) * 8.0; // Boost global bloom for stars
     
     gl_FragColor = vec4(color * bloomMultiplier, min(alpha, 1.0));
   }

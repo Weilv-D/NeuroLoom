@@ -1,4 +1,4 @@
-import { QuadraticBezierLine, Sparkles, Stars, Text } from "@react-three/drei";
+import { OrbitControls, QuadraticBezierLine, Sparkles, Stars, Text } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Bloom, ChromaticAberration, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { useMemo, useRef } from "react";
@@ -33,31 +33,44 @@ function CameraRig({
   live: boolean;
 }) {
   const { camera } = useThree();
+  const orbitRef = useRef<any>(null);
+
   const target = useMemo(
     () => new THREE.Vector3(cameraPreset.target.x, cameraPreset.target.y, cameraPreset.target.z),
     [cameraPreset.target],
   );
-  const position = useMemo(
-    () => new THREE.Vector3(cameraPreset.position.x, cameraPreset.position.y, cameraPreset.position.z),
-    [cameraPreset.position],
-  );
+  
   const focusTarget = useMemo(
     () => (focusPosition ? new THREE.Vector3(focusPosition.x, focusPosition.y, focusPosition.z) : null),
     [focusPosition],
   );
-  const lookAt = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((state) => {
-    const pulse = live ? Math.sin(state.clock.elapsedTime * 0.28) * 0.14 : 0;
-    camera.position.lerp(new THREE.Vector3(position.x, position.y + pulse, position.z), 0.06);
-    lookAt.copy(target);
-    if (focusTarget) {
-      lookAt.lerp(focusTarget, 0.16);
+    if (orbitRef.current) {
+      if (focusTarget) {
+        // Smoothly pan camera target to the focused element
+        orbitRef.current.target.lerp(focusTarget, 0.08);
+      }
+      
+      // We can also let the camera gently drift naturally if live and not interacted
+      // OrbitControls allows us to just let the user rotate normally
     }
-    camera.lookAt(lookAt);
   });
 
-  return null;
+  // minDis=1, maxDis=80 keeps user within sandbox
+  return (
+    <OrbitControls 
+      ref={orbitRef}
+      makeDefault 
+      target={target}
+      enableDamping 
+      dampingFactor={0.06} 
+      minDistance={1.0} 
+      maxDistance={80.0} 
+      autoRotate={live}
+      autoRotateSpeed={0.5}
+    />
+  );
 }
 
 function NebulaField() {
